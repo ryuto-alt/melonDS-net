@@ -42,6 +42,10 @@
     #define INVALID_SOCKET  (socket_t)-1
 #endif
 
+#include <miniupnpc/miniupnpc.h>
+#include <miniupnpc/upnpcommands.h>
+#include <miniupnpc/upnperrors.h>
+
 #include "LAN.h"
 
 
@@ -72,7 +76,6 @@ enum
 };
 
 const int kDiscoveryPort = 7063;
-const int kLANPort = 7064;
 
 
 LAN::LAN() noexcept : Inited(false)
@@ -86,7 +89,8 @@ LAN::LAN() noexcept : Inited(false)
     Active = false;
     IsHost = false;
     Host = nullptr;
-    //Lag = false;
+    GamePort = 7064;
+    UPnPActive = false;
 
     memset(RemotePeers, 0, sizeof(RemotePeers));
     memset(Players, 0, sizeof(Players));
@@ -95,7 +99,7 @@ LAN::LAN() noexcept : Inited(false)
 
     ConnectedBitmask = 0;
 
-    MPRecvTimeout = 25;
+    MPRecvTimeout = 50;
     LastHostID = -1;
     LastHostPeer = nullptr;
 
@@ -221,14 +225,16 @@ void LAN::EndDiscovery()
         Active = false;
 }
 
-bool LAN::StartHost(const char* playername, int numplayers)
+bool LAN::StartHost(const char* playername, int numplayers, int port)
 {
     if (!Inited) return false;
     if (numplayers > 16) return false;
 
+    GamePort = port;
+
     ENetAddress addr;
     addr.host = ENET_HOST_ANY;
-    addr.port = kLANPort;
+    addr.port = GamePort;
 
     Host = enet_host_create(&addr, 16, 2, 0, 0);
     if (!Host)
@@ -261,9 +267,11 @@ bool LAN::StartHost(const char* playername, int numplayers)
     return true;
 }
 
-bool LAN::StartClient(const char* playername, const char* host)
+bool LAN::StartClient(const char* playername, const char* host, int port)
 {
     if (!Inited) return false;
+
+    GamePort = port;
 
     Host = enet_host_create(nullptr, 16, 2, 0, 0);
     if (!Host)
@@ -273,7 +281,7 @@ bool LAN::StartClient(const char* playername, const char* host)
 
     ENetAddress addr;
     enet_address_set_host(&addr, host);
-    addr.port = kLANPort;
+    addr.port = GamePort;
     ENetPeer* peer = enet_host_connect(Host, &addr, 2, 0);
     if (!peer)
     {
@@ -375,6 +383,12 @@ void LAN::EndSession()
 {
     if (!Active) return;
     if (IsHost) EndDiscovery();
+
+    if (UPnPActive)
+    {
+        UPnPRemoveForward(GamePort);
+        UPnPActive = false;
+    }
 
     Active = false;
 
@@ -743,7 +757,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
                         {
                             ENetAddress peeraddr;
                             peeraddr.host = player->Address;
-                            peeraddr.port = kLANPort;
+                            peeraddr.port = GamePort;
                             ENetPeer* peer = enet_host_connect(Host, &peeraddr, 2, 0);
                             if (!peer)
                             {
@@ -811,7 +825,7 @@ void LAN::ProcessLAN(int type)
         MPPacketHeader* header = (MPPacketHeader*)&enetpacket->data[0];
         u32 packettime = header->Magic;
 
-        if ((packettime > time_last) || (packettime < (time_last - 16)))
+        if ((packettime > time_last) || (packettime < (time_last - 500)))
         {
             RXQueue.pop();
             enet_packet_destroy(enetpacket);
@@ -892,6 +906,9 @@ void LAN::Process()
     ProcessDiscovery();
     ProcessLAN(0);
 
+    if (Host)
+        enet_host_flush(Host);
+
     FrameCount++;
     if (FrameCount >= 60)
     {
@@ -942,9 +959,9 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
 {
     if (!Host) return 0;
 
-    // TODO make the reliable part optional?
-    //u32 flags = ENET_PACKET_FLAG_RELIABLE;
-    u32 flags = ENET_PACKET_FLAG_UNSEQUENCED;
+    // CMD frames (type 1, host->client) must arrive reliably
+    // REPLY and other frames use unreliable for low latency
+    u32 flags = ((type & 0xFFFF) == 1) ? ENET_PACKET_FLAG_RELIABLE : 0;
 
     ENetPacket* enetpacket = enet_packet_create(nullptr, sizeof(MPPacketHeader)+len, flags);
 
@@ -962,7 +979,6 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
         enet_peer_send(LastHostPeer, Chan_MP, enetpacket);
     else
         enet_host_broadcast(Host, Chan_MP, enetpacket);
-    enet_host_flush(Host);
 
     return len;
 }
@@ -1011,12 +1027,18 @@ int LAN::RecvPacket(int inst, u8* packet, u64* timestamp)
 
 int LAN::SendCmd(int inst, u8* packet, int len, u64 timestamp)
 {
-    return SendPacketGeneric(1, packet, len, timestamp);
+    int ret = SendPacketGeneric(1, packet, len, timestamp);
+    // flush immediately after host command so clients receive it ASAP
+    if (Host) enet_host_flush(Host);
+    return ret;
 }
 
 int LAN::SendReply(int inst, u8* packet, int len, u64 timestamp, u16 aid)
 {
-    return SendPacketGeneric(2 | (aid<<16), packet, len, timestamp);
+    int ret = SendPacketGeneric(2 | (aid<<16), packet, len, timestamp);
+    // flush immediately so host receives reply without delay
+    if (Host) enet_host_flush(Host);
+    return ret;
 }
 
 int LAN::SendAck(int inst, u8* packet, int len, u64 timestamp)
@@ -1034,6 +1056,9 @@ int LAN::RecvHostPacket(int inst, u8* packet, u64* timestamp)
             return -1;
     }
 
+    // flush pending outgoing packets before blocking on receive
+    if (Host) enet_host_flush(Host);
+
     return RecvPacketGeneric(packet, true, timestamp);
 }
 
@@ -1047,49 +1072,194 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
     if ((myinstmask & ConnectedBitmask) == ConnectedBitmask)
         return 0;
 
+    // flush pending outgoing packets first for faster round-trip
+    enet_host_flush(Host);
+
+    // first drain any already-queued packets without blocking
+    ProcessLAN(0);
+
+    u32 timeout_start = (u32)Platform::GetMSCount();
+
     for (;;)
     {
-        ProcessLAN(2);
-        if (RXQueue.empty())
+        // process queued packets
+        while (!RXQueue.empty())
         {
-            // no more replies available
+            ENetPacket* enetpacket = RXQueue.front();
+            RXQueue.pop();
+            MPPacketHeader* header = (MPPacketHeader*)&enetpacket->data[0];
+            bool good = true;
+            if ((header->Type & 0xFFFF) != 2)
+                good = false;
+            else if (header->Timestamp < (timestamp - 0x100000))
+                good = false;
+
+            if (good)
+            {
+                u32 len = header->Length;
+                if (len)
+                {
+                    if (len > 1024) len = 1024;
+
+                    u32 aid = header->Type >> 16;
+                    memcpy(&packets[(aid-1)*1024], &enetpacket->data[sizeof(MPPacketHeader)], len);
+
+                    ret |= (1<<aid);
+                }
+
+                myinstmask |= (1<<header->SenderID);
+                if (((myinstmask & ConnectedBitmask) == ConnectedBitmask) ||
+                    ((ret & aidmask) == aidmask))
+                {
+                    // all the clients have sent their reply
+                    enet_packet_destroy(enetpacket);
+                    return ret;
+                }
+            }
+
+            enet_packet_destroy(enetpacket);
+        }
+
+        // check if we've exceeded the timeout
+        u32 now = (u32)Platform::GetMSCount();
+        int remaining = MPRecvTimeout - (int)(now - timeout_start);
+        if (remaining <= 0)
+            return ret;
+
+        // wait for more packets with remaining timeout
+        ENetEvent event;
+        if (enet_host_service(Host, &event, remaining) > 0)
+        {
+            if (event.type == ENET_EVENT_TYPE_RECEIVE && event.channelID == Chan_MP)
+            {
+                MPPacketHeader* header = (MPPacketHeader*)&event.packet->data[0];
+
+                bool good = true;
+                if (event.packet->dataLength < sizeof(MPPacketHeader))
+                    good = false;
+                else if (header->Magic != 0x4946494E)
+                    good = false;
+                else if (header->SenderID == MyPlayer.ID)
+                    good = false;
+
+                if (!good)
+                {
+                    enet_packet_destroy(event.packet);
+                }
+                else
+                {
+                    header->Magic = (u32)Platform::GetMSCount();
+                    event.packet->userData = event.peer;
+                    RXQueue.push(event.packet);
+                }
+            }
+            else
+            {
+                ProcessEvent(event);
+            }
+        }
+        else
+        {
+            // no more events within timeout
             return ret;
         }
-
-        ENetPacket* enetpacket = RXQueue.front();
-        RXQueue.pop();
-        MPPacketHeader* header = (MPPacketHeader*)&enetpacket->data[0];
-        bool good = true;
-        if ((header->Type & 0xFFFF) != 2)
-            good = false;
-        else if (header->Timestamp < (timestamp - 32))
-            good = false;
-
-        if (good)
-        {
-            u32 len = header->Length;
-            if (len)
-            {
-                if (len > 1024) len = 1024;
-
-                u32 aid = header->Type >> 16;
-                memcpy(&packets[(aid-1)*1024], &enetpacket->data[sizeof(MPPacketHeader)], len);
-
-                ret |= (1<<aid);
-            }
-
-            myinstmask |= (1<<header->SenderID);
-            if (((myinstmask & ConnectedBitmask) == ConnectedBitmask) ||
-                ((ret & aidmask) == aidmask))
-            {
-                // all the clients have sent their reply
-                enet_packet_destroy(enetpacket);
-                return ret;
-            }
-        }
-
-        enet_packet_destroy(enetpacket);
     }
+}
+
+
+bool LAN::UPnPForwardPort(int port)
+{
+    int error = 0;
+    UPNPDev* devlist = upnpDiscover(2000, nullptr, nullptr, 0, 0, 2, &error);
+    if (!devlist)
+    {
+        Platform::Log(Platform::LogLevel::Error, "LAN: UPnP discovery failed (error %d)\n", error);
+        return false;
+    }
+
+    UPNPUrls urls;
+    IGDdatas data;
+    char lanaddr[64];
+    memset(&urls, 0, sizeof(urls));
+    memset(&data, 0, sizeof(data));
+
+    char wanaddr[64];
+    int ret = UPNP_GetValidIGD(devlist, &urls, &data, lanaddr, sizeof(lanaddr), wanaddr, sizeof(wanaddr));
+    if (ret == 0)
+    {
+        Platform::Log(Platform::LogLevel::Error, "LAN: No valid UPnP IGD found\n");
+        freeUPNPDevlist(devlist);
+        return false;
+    }
+
+    Platform::Log(Platform::LogLevel::Info, "LAN: UPnP IGD found (type %d), LAN address: %s\n", ret, lanaddr);
+
+    char portstr[8];
+    snprintf(portstr, sizeof(portstr), "%d", port);
+
+    int r = UPNP_AddPortMapping(
+        urls.controlURL, data.first.servicetype,
+        portstr, portstr, lanaddr,
+        "melonDS LAN", "UDP", nullptr, "0");
+
+    if (r != UPNPCOMMAND_SUCCESS)
+    {
+        Platform::Log(Platform::LogLevel::Error, "LAN: UPnP port mapping failed: %s (%d)\n", strupnperror(r), r);
+        FreeUPNPUrls(&urls);
+        freeUPNPDevlist(devlist);
+        return false;
+    }
+
+    Platform::Log(Platform::LogLevel::Info, "LAN: UPnP port %d forwarded to %s:%d\n", port, lanaddr, port);
+
+    UPnPActive = true;
+    FreeUPNPUrls(&urls);
+    freeUPNPDevlist(devlist);
+    return true;
+}
+
+void LAN::UPnPRemoveForward(int port)
+{
+    int error = 0;
+    UPNPDev* devlist = upnpDiscover(2000, nullptr, nullptr, 0, 0, 2, &error);
+    if (!devlist)
+    {
+        Platform::Log(Platform::LogLevel::Warn, "LAN: UPnP discovery failed during port removal\n");
+        return;
+    }
+
+    UPNPUrls urls;
+    IGDdatas data;
+    char lanaddr[64];
+    memset(&urls, 0, sizeof(urls));
+    memset(&data, 0, sizeof(data));
+
+    char wanaddr[64];
+    int ret = UPNP_GetValidIGD(devlist, &urls, &data, lanaddr, sizeof(lanaddr), wanaddr, sizeof(wanaddr));
+    if (ret == 0)
+    {
+        freeUPNPDevlist(devlist);
+        return;
+    }
+
+    char portstr[8];
+    snprintf(portstr, sizeof(portstr), "%d", port);
+
+    int r = UPNP_DeletePortMapping(
+        urls.controlURL, data.first.servicetype,
+        portstr, "UDP", nullptr);
+
+    if (r != UPNPCOMMAND_SUCCESS)
+    {
+        Platform::Log(Platform::LogLevel::Warn, "LAN: UPnP port removal failed: %s (%d)\n", strupnperror(r), r);
+    }
+    else
+    {
+        Platform::Log(Platform::LogLevel::Info, "LAN: UPnP port %d mapping removed\n", port);
+    }
+
+    FreeUPNPUrls(&urls);
+    freeUPNPDevlist(devlist);
 }
 
 }

@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>547</width>
-    <height>407</height>
+    <height>480</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -17,7 +17,7 @@
    </sizepolicy>
   </property>
   <property name="windowTitle">
-   <string>Join LAN game - melonDS</string>
+   <string>LANゲームに参加 - melonDS</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
@@ -25,7 +25,7 @@
      <item>
       <widget class="QLabel" name="label">
        <property name="text">
-        <string>Player name:</string>
+        <string>プレイヤー名:</string>
        </property>
       </widget>
      </item>
@@ -68,9 +68,59 @@
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="gbDirectConnect">
+     <property name="title">
+      <string>直接接続</string>
+     </property>
+     <layout class="QHBoxLayout" name="horizontalLayout_direct">
+      <item>
+       <widget class="QLabel" name="label_host">
+        <property name="text">
+         <string>ホストアドレス:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtDirectHost">
+        <property name="placeholderText">
+         <string>例: 192.168.1.100</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_directport">
+        <property name="text">
+         <string>ポート:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSpinBox" name="sbDirectPort">
+        <property name="minimum">
+         <number>1024</number>
+        </property>
+        <property name="maximum">
+         <number>65535</number>
+        </property>
+        <property name="value">
+         <number>7064</number>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btnDirectConnect">
+        <property name="text">
+         <string>接続</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QLabel" name="label_2">
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Warning: LAN requires low network latency to work.&lt;/p&gt;&lt;p&gt;Do not expect it to work through a VPN or any sort of tunnel.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;LAN検出はローカルネットワークのみです。&lt;/p&gt;&lt;p&gt;インターネット対戦は「直接接続」を使用してください。&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
    </item>

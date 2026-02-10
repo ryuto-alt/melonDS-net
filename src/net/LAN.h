@@ -85,9 +85,12 @@ public:
 
     bool StartDiscovery();
     void EndDiscovery();
-    bool StartHost(const char* player, int numplayers);
-    bool StartClient(const char* player, const char* host);
+    bool StartHost(const char* player, int numplayers, int port = 7064);
+    bool StartClient(const char* player, const char* host, int port = 7064);
     void EndSession();
+
+    bool UPnPForwardPort(int port);
+    void UPnPRemoveForward(int port);
 
     std::map<u32, DiscoveryData> GetDiscoveryList();
     std::vector<Player> GetPlayerList();
@@ -134,6 +137,9 @@ private:
     int LastHostID;
     ENetPeer* LastHostPeer;
     std::queue<ENetPacket*> RXQueue;
+
+    int GamePort;
+    bool UPnPActive;
 
     u32 FrameCount;
 

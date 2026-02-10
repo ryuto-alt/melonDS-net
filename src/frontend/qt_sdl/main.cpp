@@ -24,6 +24,12 @@
 #include <optional>
 #include <string>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <winhttp.h>
+#include <shellapi.h>
+#endif
+
 #include <QApplication>
 #include <QStyle>
 #include <QMessageBox>
@@ -266,6 +272,197 @@ bool MelonApplication::event(QEvent *event)
     return QApplication::event(event);
 }
 
+#ifdef _WIN32
+static int readLocalVersion()
+{
+    FILE* f = fopen("version.txt", "r");
+    if (!f) return 0;
+    int ver = 0;
+    fscanf(f, "%d", &ver);
+    fclose(f);
+    return ver;
+}
+
+static void writeLocalVersion(int ver)
+{
+    FILE* f = fopen("version.txt", "w");
+    if (!f) return;
+    fprintf(f, "%d\n", ver);
+    fclose(f);
+}
+
+static int checkRemoteVersion()
+{
+    HINTERNET hSession = WinHttpOpen(L"melonDS-updater/1.0",
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
+    if (!hSession) return -1;
+
+    HINTERNET hConnect = WinHttpConnect(hSession,
+        L"raw.githubusercontent.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if (!hConnect) { WinHttpCloseHandle(hSession); return -1; }
+
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET",
+        L"/ryuto-alt/melonDS-net/main/version.txt",
+        NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return -1; }
+
+    if (!WinHttpSendRequest(hRequest, NULL, 0, NULL, 0, 0, 0) ||
+        !WinHttpReceiveResponse(hRequest, NULL))
+    {
+        WinHttpCloseHandle(hRequest); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession);
+        return -1;
+    }
+
+    char buf[64] = {0};
+    DWORD bytesRead = 0;
+    WinHttpReadData(hRequest, buf, sizeof(buf) - 1, &bytesRead);
+
+    WinHttpCloseHandle(hRequest);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    return atoi(buf);
+}
+
+static bool downloadRelease(int version)
+{
+    wchar_t path[512];
+    swprintf(path, 512, L"/ryuto-alt/melonDS-net/releases/download/v%d/melonDS-dist.zip", version);
+
+    HINTERNET hSession = WinHttpOpen(L"melonDS-updater/1.0",
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
+    if (!hSession) return false;
+
+    HINTERNET hConnect = WinHttpConnect(hSession, L"github.com",
+        INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if (!hConnect) { WinHttpCloseHandle(hSession); return false; }
+
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path,
+        NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return false; }
+
+    if (!WinHttpSendRequest(hRequest, NULL, 0, NULL, 0, 0, 0) ||
+        !WinHttpReceiveResponse(hRequest, NULL))
+    {
+        WinHttpCloseHandle(hRequest); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    // GitHub releases redirect to CDN
+    DWORD statusCode = 0, statusCodeSize = sizeof(statusCode);
+    WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+        NULL, &statusCode, &statusCodeSize, NULL);
+
+    if (statusCode == 301 || statusCode == 302)
+    {
+        wchar_t redirectUrl[2048] = {0};
+        DWORD redirectSize = sizeof(redirectUrl);
+        WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_LOCATION, NULL,
+            redirectUrl, &redirectSize, NULL);
+
+        WinHttpCloseHandle(hRequest);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+
+        URL_COMPONENTSW urlComp = {};
+        urlComp.dwStructSize = sizeof(urlComp);
+        wchar_t hostName[256] = {0}, urlPath[2048] = {0};
+        urlComp.lpszHostName = hostName; urlComp.dwHostNameLength = 256;
+        urlComp.lpszUrlPath = urlPath; urlComp.dwUrlPathLength = 2048;
+
+        if (!WinHttpCrackUrl(redirectUrl, 0, 0, &urlComp)) return false;
+
+        hSession = WinHttpOpen(L"melonDS-updater/1.0",
+            WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
+        if (!hSession) return false;
+
+        hConnect = WinHttpConnect(hSession, hostName, urlComp.nPort, 0);
+        if (!hConnect) { WinHttpCloseHandle(hSession); return false; }
+
+        hRequest = WinHttpOpenRequest(hConnect, L"GET", urlPath,
+            NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+        if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return false; }
+
+        if (!WinHttpSendRequest(hRequest, NULL, 0, NULL, 0, 0, 0) ||
+            !WinHttpReceiveResponse(hRequest, NULL))
+        {
+            WinHttpCloseHandle(hRequest); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession);
+            return false;
+        }
+    }
+
+    FILE* f = fopen("_update.zip", "wb");
+    if (!f)
+    {
+        WinHttpCloseHandle(hRequest); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    char dlBuf[8192];
+    DWORD bytesRead;
+    while (WinHttpReadData(hRequest, dlBuf, sizeof(dlBuf), &bytesRead) && bytesRead > 0)
+        fwrite(dlBuf, 1, bytesRead, f);
+    fclose(f);
+
+    WinHttpCloseHandle(hRequest);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    return true;
+}
+
+static void checkForUpdates()
+{
+    int localVer = readLocalVersion();
+    int remoteVer = checkRemoteVersion();
+
+    if (remoteVer <= 0 || remoteVer <= localVer)
+        return;
+
+    QString msg = QString("melonDS v%1 が利用可能です！（現在: v%2）\n今すぐ更新しますか？")
+        .arg(remoteVer).arg(localVer);
+
+    if (QMessageBox::question(nullptr, "melonDS Update", msg,
+            QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+        return;
+
+    QMessageBox* progress = new QMessageBox(QMessageBox::Information,
+        "melonDS Update", "ダウンロード中...", QMessageBox::NoButton);
+    progress->show();
+    QApplication::processEvents();
+
+    if (!downloadRelease(remoteVer))
+    {
+        delete progress;
+        QMessageBox::warning(nullptr, "melonDS Update", "ダウンロードに失敗しました。");
+        return;
+    }
+
+    delete progress;
+
+    // Extract and apply (keep config, BIOS, saves)
+    system("powershell -NoProfile -Command \""
+        "Expand-Archive -Path '_update.zip' -DestinationPath '_update_tmp' -Force"
+        "\" 2>nul || python3 -c \""
+        "import zipfile,os; z=zipfile.ZipFile('_update.zip'); z.extractall('_update_tmp'); z.close()\"");
+
+    system("robocopy _update_tmp . /E /XF melonDS.toml version.txt /XD BIOS _update_tmp >nul 2>&1");
+
+    writeLocalVersion(remoteVer);
+
+    // Cleanup
+    system("rmdir /s /q _update_tmp >nul 2>&1");
+    DeleteFileA("_update.zip");
+
+    QMessageBox::information(nullptr, "melonDS Update",
+        QString("v%1 に更新しました！\n再起動してください。").arg(remoteVer));
+
+    // Restart
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    ShellExecuteW(NULL, L"open", exePath, NULL, NULL, SW_SHOW);
+    exit(0);
+}
+#endif
+
 int main(int argc, char** argv)
 {
     sysTimer.start();
@@ -337,6 +534,10 @@ int main(int argc, char** argv)
         QMessageBox::critical(nullptr,
                               "melonDS",
                               "Unable to write to config.\nPlease check the write permissions of the folder you placed melonDS in.");
+
+#ifdef _WIN32
+    checkForUpdates();
+#endif
 
     camStarted[0] = false;
     camStarted[1] = false;

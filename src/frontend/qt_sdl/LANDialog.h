@@ -52,6 +52,7 @@ private slots:
 
 private:
     Ui::LANStartHostDialog* ui;
+    bool UPnPEnabled;
 };
 
 class LANStartClientDialog : public QDialog

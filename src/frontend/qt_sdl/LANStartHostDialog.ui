@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>389</width>
-    <height>202</height>
+    <height>250</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -17,7 +17,7 @@
    </sizepolicy>
   </property>
   <property name="windowTitle">
-   <string>Host LAN game - melonDS</string>
+   <string>LANゲームをホスト - melonDS</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <property name="sizeConstraint">
@@ -28,7 +28,7 @@
      <item row="0" column="0">
       <widget class="QLabel" name="label">
        <property name="text">
-        <string>Player name:</string>
+        <string>プレイヤー名:</string>
        </property>
       </widget>
      </item>
@@ -38,24 +38,51 @@
      <item row="1" column="0">
       <widget class="QLabel" name="label_2">
        <property name="text">
-        <string>Number of players:</string>
+        <string>プレイヤー数:</string>
        </property>
       </widget>
      </item>
      <item row="1" column="1">
       <widget class="QSpinBox" name="sbNumPlayers"/>
      </item>
-     <item row="3" column="0" colspan="2">
-      <widget class="QLabel" name="label_3">
+     <item row="2" column="0">
+      <widget class="QLabel" name="label_port">
        <property name="text">
-        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Warning: LAN requires low network latency to work.&lt;/p&gt;&lt;p&gt;Do not expect it to work through a VPN or any sort of tunnel.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+        <string>ポート:</string>
        </property>
       </widget>
      </item>
-     <item row="2" column="0" colspan="2">
+     <item row="2" column="1">
+      <widget class="QSpinBox" name="sbPort">
+       <property name="minimum">
+        <number>1024</number>
+       </property>
+       <property name="maximum">
+        <number>65535</number>
+       </property>
+       <property name="value">
+        <number>7064</number>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="0" colspan="2">
+      <widget class="QCheckBox" name="cbUPnP">
+       <property name="text">
+        <string>UPnPで自動ポート開放</string>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="0" colspan="2">
       <widget class="QLabel" name="label_4">
        <property name="text">
         <string/>
+       </property>
+      </widget>
+     </item>
+     <item row="5" column="0" colspan="2">
+      <widget class="QLabel" name="label_3">
+       <property name="text">
+        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;インターネット対戦にはポート開放が必要です。&lt;/p&gt;&lt;p&gt;UPnP対応ルーターなら自動開放できます。&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
        </property>
       </widget>
      </item>

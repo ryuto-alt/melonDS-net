@@ -34,6 +34,8 @@ set(SOURCES_QT_SDL
     TitleManagerDialog.cpp
     OSD_shaders.h
     font.h
+    BMFont.h
+    BMFont.cpp
     Platform.cpp
     Platform_AAC.cpp
     QPathInput.h
@@ -215,7 +217,7 @@ if (WIN32)
     endif()
 
 
-    target_link_libraries(melonDS PRIVATE ws2_32 iphlpapi)
+    target_link_libraries(melonDS PRIVATE ws2_32 iphlpapi winhttp shell32)
     set_target_properties(melonDS PROPERTIES WIN32_EXECUTABLE $<IF:$<CONFIG:Debug>,OFF,ON>)
 
     if (MINGW)
