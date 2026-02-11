@@ -33,6 +33,7 @@
 #include "glad/glad.h"
 #include "ScreenLayout.h"
 #include "duckstation/gl/context.h"
+#include "BMFont.h"
 
 
 class MainWindow;
@@ -123,8 +124,13 @@ protected:
     std::deque<OSDItem> osdItems;
 
     QPixmap splashLogo;
-    OSDItem splashText[3];
-    QPoint splashPos[4];
+    OSDItem splashText[4];
+    QPoint splashPos[5];
+
+    BMFont splashFont;
+    bool splashFontLoaded = false;
+    QImage splashBmText[4];
+    bool splashBmRendered = false;
 
     void loadConfig();
 

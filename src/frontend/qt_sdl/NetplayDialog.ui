@@ -11,13 +11,13 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>NETPLAY SHITO</string>
+   <string>ネットプレイ - melonDS</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_2">
    <item>
     <widget class="QLabel" name="lblStatus">
      <property name="text">
-      <string>STATUS PLACEHOLDER</string>
+      <string>ステータス</string>
      </property>
     </widget>
    </item>

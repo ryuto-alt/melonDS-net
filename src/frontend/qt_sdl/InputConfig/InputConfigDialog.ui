@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Input and hotkeys - melonDS</string>
+   <string>入力とホットキー - melonDS</string>
   </property>
   <property name="styleSheet">
    <string notr="true">#grp_ControlPad, #grp_ABXY, #grp_ControlPad_2, #grp_ABXY_2 { border: none }</string>
@@ -37,7 +37,7 @@
      </property>
      <widget class="QWidget" name="tabInput">
       <attribute name="title">
-       <string>DS keypad</string>
+       <string>DSキーパッド</string>
       </attribute>
       <layout class="QGridLayout" name="gridLayout">
        <item row="0" column="0">
@@ -65,7 +65,7 @@
              <item>
               <widget class="QPushButton" name="btnJoyMapSwitch">
                <property name="text">
-                <string>Switch to Joystick mappings</string>
+                <string>ジョイスティック割り当てに切り替え</string>
                </property>
               </widget>
              </item>
@@ -1145,7 +1145,7 @@
               </font>
              </property>
              <property name="text">
-              <string>Keyboard mappings</string>
+              <string>キーボード割り当て</string>
              </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
@@ -1174,7 +1174,7 @@
              <item>
               <widget class="QPushButton" name="btnKeyMapSwitch">
                <property name="text">
-                <string>Switch to Keyboard mappings</string>
+                <string>キーボード割り当てに切り替え</string>
                </property>
               </widget>
              </item>
@@ -2254,7 +2254,7 @@
               </font>
              </property>
              <property name="text">
-              <string>Joystick mappings</string>
+              <string>ジョイスティック割り当て</string>
              </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
@@ -2269,12 +2269,12 @@
      </widget>
      <widget class="QWidget" name="tabAddons">
       <attribute name="title">
-       <string>Add-ons</string>
+       <string>アドオン</string>
       </attribute>
      </widget>
      <widget class="QWidget" name="tabHotkeysGeneral">
       <attribute name="title">
-       <string>General hotkeys</string>
+       <string>一般ホットキー</string>
       </attribute>
      </widget>
     </widget>
@@ -2302,7 +2302,7 @@
         </sizepolicy>
        </property>
        <property name="text">
-        <string>Joystick:</string>
+        <string>ジョイスティック:</string>
        </property>
       </widget>
      </item>
@@ -2324,7 +2324,7 @@
    <item row="0" column="0">
     <widget class="QLabel" name="lblInstanceNum">
      <property name="text">
-      <string>Configuring mappings for instance X</string>
+      <string>インスタンスXの割り当てを設定中</string>
      </property>
     </widget>
    </item>

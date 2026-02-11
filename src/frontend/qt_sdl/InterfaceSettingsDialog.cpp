@@ -48,7 +48,7 @@ InterfaceSettingsDialog::InterfaceSettingsDialog(QWidget* parent) : QDialog(pare
     const QString currentTheme = qApp->style()->objectName();
     QString cfgTheme = cfg.GetQString("UITheme");
 
-    ui->cbxUITheme->addItem("System default", "");
+    ui->cbxUITheme->addItem("システムデフォルト", "");
 
     for (int i = 0; i < themeKeys.length(); i++)
     {

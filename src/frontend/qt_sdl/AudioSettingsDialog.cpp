@@ -51,14 +51,14 @@ AudioSettingsDialog::AudioSettingsDialog(QWidget* parent) : QDialog(parent), ui(
     volume = oldVolume;
     dsiSync = oldDSiSync;
 
-    ui->cbInterpolation->addItem("None");
-    ui->cbInterpolation->addItem("Linear");
-    ui->cbInterpolation->addItem("Cosine");
-    ui->cbInterpolation->addItem("Cubic");
-    ui->cbInterpolation->addItem("Gaussian (SNES)");
+    ui->cbInterpolation->addItem(QString::fromUtf8("なし"));
+    ui->cbInterpolation->addItem(QString::fromUtf8("リニア"));
+    ui->cbInterpolation->addItem(QString::fromUtf8("コサイン"));
+    ui->cbInterpolation->addItem(QString::fromUtf8("キュービック"));
+    ui->cbInterpolation->addItem(QString::fromUtf8("ガウシアン (SNES)"));
     ui->cbInterpolation->setCurrentIndex(oldInterp);
 
-    ui->cbBitDepth->addItem("Automatic");
+    ui->cbBitDepth->addItem(QString::fromUtf8("自動"));
     ui->cbBitDepth->addItem("10-bit");
     ui->cbBitDepth->addItem("16-bit");
     ui->cbBitDepth->setCurrentIndex(oldBitDepth);
@@ -119,7 +119,7 @@ AudioSettingsDialog::AudioSettingsDialog(QWidget* parent) : QDialog(parent), ui(
     int inst = emuInstance->getInstanceID();
     if (inst > 0)
     {
-        ui->lblInstanceNum->setText(QString("Configuring settings for instance %1").arg(inst+1));
+        ui->lblInstanceNum->setText(QString::fromUtf8("インスタンス%1の設定").arg(inst+1));
         ui->cbInterpolation->setEnabled(false);
         ui->cbBitDepth->setEnabled(false);
         for (QAbstractButton* btn : grpMicMode->buttons())
@@ -269,9 +269,9 @@ void AudioSettingsDialog::onChangeMicMode(int mode)
 void AudioSettingsDialog::on_btnMicWavBrowse_clicked()
 {
     QString file = QFileDialog::getOpenFileName(this,
-                                                "Select WAV file...",
+                                                QString::fromUtf8("WAVファイルを選択..."),
                                                 emuDirectory,
-                                                "WAV files (*.wav);;Any file (*.*)");
+                                                QString::fromUtf8("WAVファイル (*.wav);;すべてのファイル (*.*)"));
 
     if (file.isEmpty()) return;
 

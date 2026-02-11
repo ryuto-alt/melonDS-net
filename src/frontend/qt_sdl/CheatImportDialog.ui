@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Import cheat codes - melonDS</string>
+   <string>チートコードをインポート - melonDS</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_3">
    <item>
@@ -33,7 +33,7 @@
        <item>
         <widget class="QCheckBox" name="chkShowAllMatches">
          <property name="text">
-          <string>Show all game code matches</string>
+          <string>すべてのゲームコード一致を表示</string>
          </property>
         </widget>
        </item>
@@ -43,14 +43,14 @@
        <item>
         <widget class="QCheckBox" name="chkRemoveOld">
          <property name="text">
-          <string>Clear cheat file before import</string>
+          <string>インポート前にチートファイルをクリア</string>
          </property>
         </widget>
        </item>
        <item>
         <widget class="QLabel" name="label_8">
          <property name="text">
-          <string>Check the cheat codes to import in the list below.</string>
+          <string>以下のリストからインポートするチートコードを選択してください。</string>
          </property>
         </widget>
        </item>
@@ -80,7 +80,7 @@
        <item>
         <widget class="QGroupBox" name="gbDatabaseInfo">
          <property name="title">
-          <string>Database</string>
+          <string>データベース</string>
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_4">
           <item>
@@ -114,13 +114,13 @@
           </sizepolicy>
          </property>
          <property name="title">
-          <string>Selected game</string>
+          <string>選択したゲーム</string>
          </property>
          <layout class="QFormLayout" name="formLayout">
           <item row="0" column="0">
            <widget class="QLabel" name="label_2">
             <property name="text">
-             <string>Name:</string>
+             <string>名前:</string>
             </property>
            </widget>
           </item>
@@ -146,7 +146,7 @@
           <item row="1" column="0">
            <widget class="QLabel" name="label_3">
             <property name="text">
-             <string>Game code:</string>
+             <string>ゲームコード:</string>
             </property>
            </widget>
           </item>
@@ -163,7 +163,7 @@
           <item row="2" column="0">
            <widget class="QLabel" name="label_5">
             <property name="text">
-             <string>Checksum:</string>
+             <string>チェックサム:</string>
             </property>
            </widget>
           </item>
@@ -189,7 +189,7 @@
           </sizepolicy>
          </property>
          <property name="title">
-          <string>Selected code</string>
+          <string>選択したコード</string>
          </property>
          <layout class="QFormLayout" name="formLayout_3">
           <item row="0" column="0">
@@ -201,7 +201,7 @@
              </sizepolicy>
             </property>
             <property name="text">
-             <string>Name:</string>
+             <string>名前:</string>
             </property>
             <property name="alignment">
              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
@@ -236,7 +236,7 @@
              </sizepolicy>
             </property>
             <property name="text">
-             <string>Description:</string>
+             <string>説明:</string>
             </property>
             <property name="alignment">
              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
@@ -271,7 +271,7 @@
              </sizepolicy>
             </property>
             <property name="text">
-             <string>Status:</string>
+             <string>ステータス:</string>
             </property>
            </widget>
           </item>
@@ -300,7 +300,7 @@
              </sizepolicy>
             </property>
             <property name="text">
-             <string>Code:</string>
+             <string>コード:</string>
             </property>
             <property name="alignment">
              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>

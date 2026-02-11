@@ -17,7 +17,7 @@
    </sizepolicy>
   </property>
   <property name="windowTitle">
-   <string>Emu settings - melonDS</string>
+   <string>エミュレーション設定 - melonDS</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <property name="sizeConstraint">
@@ -30,7 +30,7 @@
      </property>
      <widget class="QWidget" name="tab">
       <attribute name="title">
-       <string>General</string>
+       <string>一般</string>
       </attribute>
       <layout class="QFormLayout" name="formLayout_4">
        <item row="1" column="1">
@@ -52,7 +52,7 @@
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;When loading a ROM, completely skip the regular boot process (&amp;quot;Nintendo DS&amp;quot; screen) to boot the ROM directly.&lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;p&gt;Note: if your firmware dump isn't bootable, the ROM will be booted directly regardless of this setting.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
          <property name="text">
-          <string>Boot game directly</string>
+          <string>ゲームを直接起動</string>
          </property>
         </widget>
        </item>
@@ -78,7 +78,7 @@
           </sizepolicy>
          </property>
          <property name="text">
-          <string>Console type:</string>
+          <string>本体タイプ:</string>
          </property>
         </widget>
        </item>
@@ -86,13 +86,13 @@
      </widget>
      <widget class="QWidget" name="tab_2">
       <attribute name="title">
-       <string>DS-mode</string>
+       <string>DSモード</string>
       </attribute>
       <layout class="QGridLayout" name="gridLayout">
        <item row="3" column="2">
         <widget class="QPushButton" name="btnFirmwareBrowse">
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
         </widget>
        </item>
@@ -112,14 +112,14 @@
        <item row="3" column="0">
         <widget class="QLabel" name="label_3">
          <property name="text">
-          <string>DS firmware:</string>
+          <string>DSファームウェア:</string>
          </property>
         </widget>
        </item>
        <item row="2" column="2">
         <widget class="QPushButton" name="btnBIOS7Browse">
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
         </widget>
        </item>
@@ -182,7 +182,7 @@
           </sizepolicy>
          </property>
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
          <property name="autoDefault">
           <bool>false</bool>
@@ -195,7 +195,7 @@
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Allows using external user-provided BIOS and firmware dumps.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
          <property name="text">
-          <string>Use external BIOS/firmware files</string>
+          <string>外部BIOS/ファームウェアファイルを使用</string>
          </property>
         </widget>
        </item>
@@ -203,7 +203,7 @@
      </widget>
      <widget class="QWidget" name="tab_4">
       <attribute name="title">
-       <string>DSi-mode</string>
+       <string>DSiモード</string>
       </attribute>
       <layout class="QGridLayout" name="gridLayout_2">
        <item row="8" column="0" colspan="2">
@@ -219,21 +219,21 @@
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Make the emulated SD card read-only.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
          <property name="text">
-          <string>Read-only SD</string>
+          <string>読み取り専用SD</string>
          </property>
         </widget>
        </item>
        <item row="3" column="0">
         <widget class="QLabel" name="label_7">
          <property name="text">
-          <string>DSi firmware:</string>
+          <string>DSiファームウェア:</string>
          </property>
         </widget>
        </item>
        <item row="13" column="2">
         <widget class="QPushButton" name="btnDSiSDFolderBrowse">
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
         </widget>
        </item>
@@ -243,7 +243,7 @@
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Sync the emulated SD card to the given folder. The folder's contents will be copied to the SD image, and any change made to the SD image will be reflected to the folder.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
          <property name="text">
-          <string>Sync SD to folder:</string>
+          <string>SDをフォルダに同期:</string>
          </property>
         </widget>
        </item>
@@ -264,7 +264,7 @@
        <item row="3" column="2">
         <widget class="QPushButton" name="btnDSiFirmwareBrowse">
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
         </widget>
        </item>
@@ -281,7 +281,7 @@
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Simulate a SD card being inserted in the DSi's SD slot.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
          <property name="text">
-          <string>Enable DSi SD card</string>
+          <string>DSi SDカードを有効化</string>
          </property>
         </widget>
        </item>
@@ -295,7 +295,7 @@
        <item row="11" column="0">
         <widget class="QLabel" name="label_13">
          <property name="text">
-          <string>Image size:</string>
+          <string>イメージサイズ:</string>
          </property>
         </widget>
        </item>
@@ -323,7 +323,7 @@
        <item row="1" column="2">
         <widget class="QPushButton" name="btnDSiBIOS9Browse">
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
         </widget>
        </item>
@@ -337,28 +337,28 @@
        <item row="2" column="2">
         <widget class="QPushButton" name="btnDSiBIOS7Browse">
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
         </widget>
        </item>
        <item row="10" column="2">
         <widget class="QPushButton" name="btnDSiSDBrowse">
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
         </widget>
        </item>
        <item row="0" column="0" colspan="3">
         <widget class="QLabel" name="label_15">
          <property name="text">
-          <string>DSi mode requires external DSi BIOS/firmware/NAND</string>
+          <string>DSiモードには外部DSi BIOS/ファームウェア/NANDが必要です</string>
          </property>
         </widget>
        </item>
        <item row="10" column="0">
         <widget class="QLabel" name="label_10">
          <property name="text">
-          <string>SD card image:</string>
+          <string>SDカードイメージ:</string>
          </property>
         </widget>
        </item>
@@ -372,7 +372,7 @@
        <item row="4" column="2">
         <widget class="QPushButton" name="btnDSiNANDBrowse">
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
         </widget>
        </item>
@@ -407,20 +407,20 @@
      </widget>
      <widget class="QWidget" name="tab_3">
       <attribute name="title">
-       <string>CPU emulation</string>
+       <string>CPUエミュレーション</string>
       </attribute>
       <layout class="QFormLayout" name="formLayout_5">
        <item row="0" column="0">
         <widget class="QCheckBox" name="chkEnableJIT">
          <property name="text">
-          <string>Enable JIT recompiler</string>
+          <string>JITリコンパイラを有効化</string>
          </property>
         </widget>
        </item>
        <item row="1" column="0">
         <widget class="QLabel" name="label_9">
          <property name="text">
-          <string>Maximum JIT block size:</string>
+          <string>JIT最大ブロックサイズ:</string>
          </property>
         </widget>
        </item>
@@ -440,21 +440,21 @@
        <item row="2" column="0">
         <widget class="QCheckBox" name="chkJITBranchOptimisations">
          <property name="text">
-          <string>Branch optimisations</string>
+          <string>分岐最適化</string>
          </property>
         </widget>
        </item>
        <item row="3" column="0">
         <widget class="QCheckBox" name="chkJITLiteralOptimisations">
          <property name="text">
-          <string>Literal optimisations</string>
+          <string>リテラル最適化</string>
          </property>
         </widget>
        </item>
        <item row="4" column="0">
         <widget class="QCheckBox" name="chkJITFastMemory">
          <property name="text">
-          <string>Fast memory</string>
+          <string>高速メモリ</string>
          </property>
         </widget>
        </item>
@@ -481,14 +481,14 @@
        <item row="1" column="2">
         <widget class="QPushButton" name="btnDLDISDBrowse">
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
         </widget>
        </item>
        <item row="4" column="2">
         <widget class="QPushButton" name="btnDLDIFolderBrowse">
          <property name="text">
-          <string>Browse...</string>
+          <string>参照...</string>
          </property>
         </widget>
        </item>
@@ -502,7 +502,7 @@
        <item row="2" column="0">
         <widget class="QLabel" name="label_12">
          <property name="text">
-          <string>Image size:</string>
+          <string>イメージサイズ:</string>
          </property>
         </widget>
        </item>
@@ -512,7 +512,7 @@
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Sync the emulated SD card to the given folder. The folder's contents will be copied to the SD image, and any change made to the SD image will be reflected to the folder.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
          <property name="text">
-          <string>Sync SD to folder:</string>
+          <string>SDをフォルダに同期:</string>
          </property>
         </widget>
        </item>
@@ -529,7 +529,7 @@
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Enable the built-in DLDI driver, to let homebrew access files from an emulated SD card.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
          <property name="text">
-          <string>Enable DLDI (for homebrew)</string>
+          <string>DLDIを有効化 (自作ソフト用)</string>
          </property>
         </widget>
        </item>
@@ -556,7 +556,7 @@
        <item row="1" column="0">
         <widget class="QLabel" name="label_11">
          <property name="text">
-          <string>SD card image:</string>
+          <string>SDカードイメージ:</string>
          </property>
         </widget>
        </item>
@@ -566,7 +566,7 @@
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Make the emulated SD card read-only.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
          <property name="text">
-          <string>Read-only SD</string>
+          <string>読み取り専用SD</string>
          </property>
         </widget>
        </item>
@@ -574,7 +574,7 @@
      </widget>
      <widget class="QWidget" name="tab_6">
       <attribute name="title">
-       <string>Devtools</string>
+       <string>開発ツール</string>
       </attribute>
       <layout class="QGridLayout" name="gridLayout_3">
        <item row="1" column="0">
@@ -607,28 +607,28 @@
        <item row="0" column="0" colspan="3">
         <widget class="QCheckBox" name="cbGdbEnabled">
          <property name="text">
-          <string>Enable GDB stub</string>
+          <string>GDBスタブを有効化</string>
          </property>
         </widget>
        </item>
        <item row="4" column="0" colspan="7">
         <widget class="QLabel" name="label_18">
          <property name="text">
-          <string>Note: melonDS must be restarted in order for these changes to have effect</string>
+          <string>注意: この変更を適用するにはmelonDSを再起動する必要があります</string>
          </property>
         </widget>
        </item>
        <item row="3" column="0" colspan="7">
         <widget class="QLabel" name="label_19">
          <property name="text">
-          <string>Note: GDB stub cannot be used together with the JIT recompiler</string>
+          <string>注意: GDBスタブはJITリコンパイラと同時に使用できません</string>
          </property>
         </widget>
        </item>
        <item row="1" column="6">
         <widget class="QCheckBox" name="cbGdbBOSA9">
          <property name="text">
-          <string>Break on startup</string>
+          <string>起動時にブレーク</string>
          </property>
         </widget>
        </item>
@@ -661,7 +661,7 @@
        <item row="2" column="6">
         <widget class="QCheckBox" name="cbGdbBOSA7">
          <property name="text">
-          <string>Break on startup</string>
+          <string>起動時にブレーク</string>
          </property>
         </widget>
        </item>

@@ -17,7 +17,7 @@
    </sizepolicy>
   </property>
   <property name="windowTitle">
-   <string>Wifi settings - melonDS</string>
+   <string>Wi-Fi設定 - melonDS</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <property name="sizeConstraint">
@@ -31,7 +31,7 @@
 }</string>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;These settings control how melonDS connects to the internet for online features (typically called &amp;quot;Nintendo Wi-Fi Connection&amp;quot;) in games. &lt;/p&gt;&lt;p&gt;Local multiplayer features do not use the same network protocols as online play, so the settings here will have no effect on them.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;これらの設定は、melonDSがゲーム内のオンライン機能（通称「ニンテンドーWi-Fiコネクション」）でインターネットに接続する方法を制御します。&lt;/p&gt;&lt;p&gt;ローカルマルチプレイ機能はオンラインプレイとは異なるネットワークプロトコルを使用するため、ここでの設定は影響しません。&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>
@@ -44,7 +44,7 @@
    <item>
     <widget class="QGroupBox" name="groupBox">
      <property name="title">
-      <string>Network mode</string>
+      <string>ネットワークモード</string>
      </property>
      <layout class="QGridLayout" name="gridLayout">
       <item row="1" column="0">
@@ -53,7 +53,7 @@
          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Indirect mode uses libslirp. It requires no extra setup and is easy to use.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
         </property>
         <property name="text">
-         <string>Indirect mode (uses libslirp, recommended)</string>
+         <string>インダイレクトモード (libslirp使用、推奨)</string>
         </property>
        </widget>
       </item>
@@ -63,7 +63,7 @@
          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Direct mode directly routes network traffic to the host network. It is the most reliable, but requires an ethernet connection.&lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;p&gt;Non-direct mode uses a layer of emulation to get around this, but is more prone to problems.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
         </property>
         <property name="text">
-         <string>Direct mode [TEXT PLACEHOLDER]</string>
+         <string>ダイレクトモード [TEXT PLACEHOLDER]</string>
         </property>
        </widget>
       </item>
@@ -73,7 +73,7 @@
    <item>
     <widget class="QGroupBox" name="groupBox_3">
      <property name="title">
-      <string>Direct mode settings</string>
+      <string>ダイレクトモード設定</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_3">
       <item row="3" column="1">
@@ -86,7 +86,7 @@
       <item row="2" column="0">
        <widget class="QLabel" name="label_2">
         <property name="text">
-         <string>MAC address:</string>
+         <string>MACアドレス:</string>
         </property>
        </widget>
       </item>
@@ -112,7 +112,7 @@
       <item row="1" column="0">
        <widget class="QLabel" name="label">
         <property name="text">
-         <string>Network adapter:</string>
+         <string>ネットワークアダプター:</string>
         </property>
        </widget>
       </item>
@@ -126,7 +126,7 @@
       <item row="3" column="0">
        <widget class="QLabel" name="label_3">
         <property name="text">
-         <string>IP address:</string>
+         <string>IPアドレス:</string>
         </property>
        </widget>
       </item>

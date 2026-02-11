@@ -99,7 +99,7 @@ LAN::LAN() noexcept : Inited(false)
 
     ConnectedBitmask = 0;
 
-    MPRecvTimeout = 50;
+    MPRecvTimeout = 25;
     LastHostID = -1;
     LastHostPeer = nullptr;
 
@@ -878,9 +878,9 @@ void LAN::ProcessLAN(int type)
                 event.packet->userData = event.peer;
                 RXQueue.push(event.packet);
 
-                // return now -- if we are receiving MP frames, if we keep going
-                // we'll consume too many even if we have no timeout set
-                return;
+                // After receiving an MP frame, switch to non-blocking mode
+                // to drain any remaining queued packets without waiting
+                timeout = 0;
             }
         }
         else
@@ -888,7 +888,7 @@ void LAN::ProcessLAN(int type)
             ProcessEvent(event);
         }
 
-        if (type == 2)
+        if (type == 2 && timeout > 0)
         {
             u32 time = (u32)Platform::GetMSCount();
             if (time < time_last) return;
@@ -959,9 +959,11 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
 {
     if (!Host) return 0;
 
-    // CMD frames (type 1, host->client) must arrive reliably
-    // REPLY and other frames use unreliable for low latency
-    u32 flags = ((type & 0xFFFF) == 1) ? ENET_PACKET_FLAG_RELIABLE : 0;
+    // Use unreliable unsequenced delivery for MP data:
+    // - Eliminates head-of-line blocking that causes game freezes
+    // - DS WiFi protocol has its own retry mechanism for lost packets
+    // - Minimizes latency for real-time multiplayer communication
+    u32 flags = ENET_PACKET_FLAG_UNSEQUENCED;
 
     ENetPacket* enetpacket = enet_packet_create(nullptr, sizeof(MPPacketHeader)+len, flags);
 
@@ -1043,7 +1045,9 @@ int LAN::SendReply(int inst, u8* packet, int len, u64 timestamp, u16 aid)
 
 int LAN::SendAck(int inst, u8* packet, int len, u64 timestamp)
 {
-    return SendPacketGeneric(3, packet, len, timestamp);
+    int ret = SendPacketGeneric(3, packet, len, timestamp);
+    if (Host) enet_host_flush(Host);
+    return ret;
 }
 
 int LAN::RecvHostPacket(int inst, u8* packet, u64* timestamp)
@@ -1126,9 +1130,10 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         if (remaining <= 0)
             return ret;
 
-        // wait for more packets with remaining timeout
+        // poll for more packets with short intervals for responsiveness
+        int poll_timeout = (remaining > 5) ? 5 : remaining;
         ENetEvent event;
-        if (enet_host_service(Host, &event, remaining) > 0)
+        if (enet_host_service(Host, &event, poll_timeout) > 0)
         {
             if (event.type == ENET_EVENT_TYPE_RECEIVE && event.channelID == Chan_MP)
             {
@@ -1160,8 +1165,11 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         }
         else
         {
-            // no more events within timeout
-            return ret;
+            // no events in this poll interval; continue if total timeout not expired
+            u32 now2 = (u32)Platform::GetMSCount();
+            int remaining2 = MPRecvTimeout - (int)(now2 - timeout_start);
+            if (remaining2 <= 0)
+                return ret;
         }
     }
 }

@@ -123,12 +123,12 @@ void ROMInfoDialog::populateBannerInfo(const NDSBanner* banner)
     if (banner->Version > 1)
         ui->chineseTitle->setText(QString::fromUtf16(banner->ChineseTitle));
     else
-        ui->chineseTitle->setText("None");
+        ui->chineseTitle->setText("なし");
 
     if (banner->Version > 2)
         ui->koreanTitle->setText(QString::fromUtf16(banner->KoreanTitle));
     else
-        ui->koreanTitle->setText("None");
+        ui->koreanTitle->setText("なし");
 }
 
 void ROMInfoDialog::populateHeaderInfo(const NDSHeader& header)
@@ -169,9 +169,9 @@ void ROMInfoDialog::done(int r)
 void ROMInfoDialog::on_saveIconButton_clicked()
 {
     QString filename = QFileDialog::getSaveFileName(this,
-                                                    "Save Icon",
+                                                    "アイコンを保存",
                                                     emuInstance->getGlobalConfig().GetQString("LastROMFolder"),
-                                                    "PNG Images (*.png)");
+                                                    "PNG画像 (*.png)");
     if (filename.isEmpty())
         return;
 
@@ -181,9 +181,9 @@ void ROMInfoDialog::on_saveIconButton_clicked()
 void ROMInfoDialog::on_saveAnimatedIconButton_clicked()
 {
     QString filename = QFileDialog::getSaveFileName(this,
-                                                    "Save Animated Icon",
+                                                    "アニメーションアイコンを保存",
                                                     emuInstance->getGlobalConfig().GetQString("LastROMFolder"),
-                                                    "GIF Images (*.gif)");
+                                                    "GIF画像 (*.gif)");
     if (filename.isEmpty())
         return;
 

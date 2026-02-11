@@ -19,7 +19,7 @@
 #ifndef ARMJIT_X64_COMPILER_H
 #define ARMJIT_X64_COMPILER_H
 
-#if defined(JIT_ENABLED) && defined(__x86_64__)
+#if defined(JIT_ENABLED) && (defined(__x86_64__) || defined(_M_X64))
 
 #include "../dolphin/x64Emitter.h"
 

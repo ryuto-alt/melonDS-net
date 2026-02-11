@@ -56,7 +56,7 @@ using namespace QNativeInterface;
 
 
 const u32 kOSDMargin = 6;
-const int kLogoWidth = 192;
+const int kLogoWidth = 256;
 
 
 ScreenPanel::ScreenPanel(QWidget* parent) : QWidget(parent)
@@ -89,13 +89,17 @@ ScreenPanel::ScreenPanel(QWidget* parent) : QWidget(parent)
 
     splashLogo = QPixmap(":/melon-logo");
 
-    strncpy(splashText[0].text, "File->Open ROM...", 256);
+    // Load BMFont for splash text
+    splashFontLoaded = splashFont.load(":/osd-font-fnt", ":/osd-font-png");
+
+    // Splash text strings (UTF-8)
+    strncpy(splashText[0].text, "\xe3\x83\x95\xe3\x82\xa1\xe3\x82\xa4\xe3\x83\xab\xe2\x86\x92ROM\xe3\x82\x92\xe9\x96\x8b\xe3\x81\x8f...", 256); // ファイル→ROMを開く...
     splashText[0].id = 0x80000000;
     splashText[0].color = 0;
     splashText[0].rendered = false;
     splashText[0].rainbowstart = -1;
 
-    strncpy(splashText[1].text, "to get started", 256);
+    strncpy(splashText[1].text, "\xe3\x81\xa7\xe5\xa7\x8b\xe3\x82\x81\xe3\x82\x88\xe3\x81\x86", 256); // で始めよう
     splashText[1].id = 0x80000001;
     splashText[1].color = 0;
     splashText[1].rendered = false;
@@ -109,6 +113,12 @@ ScreenPanel::ScreenPanel(QWidget* parent) : QWidget(parent)
     splashText[2].color = 0;
     splashText[2].rendered = false;
     splashText[2].rainbowstart = -1;
+
+    strncpy(splashText[3].text, "Translated by RYUTO", 256);
+    splashText[3].id = 0x80000003;
+    splashText[3].color = 0;
+    splashText[3].rendered = false;
+    splashText[3].rainbowstart = -1;
 }
 
 ScreenPanel::~ScreenPanel()
@@ -680,18 +690,38 @@ void ScreenPanel::osdUpdate()
 
     // render splashscreen text items if needed
 
-    int rainbowinc = -1;
     bool needrecalc = false;
 
-    for (int i = 0; i < 3; i++)
+    if (splashFontLoaded && !splashBmRendered)
     {
-        if (!splashText[i].rendered)
+        // Use BMFont for splash text (supports Japanese)
+        float scale = 0.75f;
+        int rend = -1;
+        for (int i = 0; i < 4; i++)
         {
-            splashText[i].rainbowstart = rainbowinc;
-            osdRenderItem(&splashText[i]);
+            int rout = 0;
+            splashBmText[i] = splashFont.renderText(splashText[i].text, 0, true, rend, &rout, scale);
+            splashText[i].bitmap = splashBmText[i];
             splashText[i].rendered = true;
-            rainbowinc = splashText[i].rainbowend;
-            needrecalc = true;
+            rend = rout;
+        }
+        splashBmRendered = true;
+        needrecalc = true;
+    }
+    else if (!splashFontLoaded)
+    {
+        // Fallback: original OSD font (ASCII only)
+        int rainbowinc = -1;
+        for (int i = 0; i < 4; i++)
+        {
+            if (!splashText[i].rendered)
+            {
+                splashText[i].rainbowstart = rainbowinc;
+                osdRenderItem(&splashText[i]);
+                splashText[i].rendered = true;
+                rainbowinc = splashText[i].rainbowend;
+                needrecalc = true;
+            }
         }
     }
 
@@ -737,13 +767,19 @@ void ScreenPanel::calcSplashLayout()
         splashPos[1].setY(basey);
     }
 
-    // bottom text
+    // bottom text (URL)
+    int bottomArea = h - (ylogo + kLogoWidth);
+    int bottomCenter = ylogo + kLogoWidth + bottomArea / 2;
     splashPos[2].setX((w - splashText[2].bitmap.width()) / 2);
-    splashPos[2].setY(ylogo + kLogoWidth + ((ylogo - splashText[2].bitmap.height()) / 2));
+    splashPos[2].setY(bottomCenter - splashText[2].bitmap.height() - 2);
+
+    // credit text
+    splashPos[3].setX((w - splashText[3].bitmap.width()) / 2);
+    splashPos[3].setY(bottomCenter + 2);
 
     // logo
-    splashPos[3].setX(xlogo);
-    splashPos[3].setY(ylogo);
+    splashPos[4].setX(xlogo);
+    splashPos[4].setY(ylogo);
 
     osdMutex.unlock();
 }
@@ -833,9 +869,9 @@ void ScreenPanelNative::paintEvent(QPaintEvent* event)
         // splashscreen
         osdMutex.lock();
 
-        painter.drawPixmap(QRect(splashPos[3], QSize(kLogoWidth, kLogoWidth)), splashLogo);
+        painter.drawPixmap(QRect(splashPos[4], QSize(kLogoWidth, kLogoWidth)), splashLogo);
 
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
             painter.drawImage(splashPos[i], splashText[i].bitmap);
 
         osdMutex.unlock();
@@ -1193,18 +1229,32 @@ void ScreenPanelGL::drawScreen()
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
         glBindTexture(GL_TEXTURE_2D, logoTexture);
-        glUniform2i(osdPosULoc, splashPos[3].x(), splashPos[3].y());
+        glUniform2i(osdPosULoc, splashPos[4].x(), splashPos[4].y());
         glUniform2i(osdSizeULoc, kLogoWidth, kLogoWidth);
         glDrawArrays(GL_TRIANGLES, 0, 2*3);
 
         glUniform1f(osdTexScaleULoc, 1.0);
 
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
         {
             OSDItem& item = splashText[i];
 
-            if (!osdTextures.count(item.id))
+            if (!item.rendered || item.bitmap.isNull())
                 continue;
+
+            if (!osdTextures.count(item.id))
+            {
+                // Lazily upload splash text texture
+                GLuint tex;
+                glGenTextures(1, &tex);
+                glBindTexture(GL_TEXTURE_2D, tex);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, item.bitmap.width(), item.bitmap.height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, item.bitmap.bits());
+                osdTextures[item.id] = tex;
+            }
 
             glBindTexture(GL_TEXTURE_2D, osdTextures[item.id]);
             glUniform2i(osdPosULoc, splashPos[i].x(), splashPos[i].y());

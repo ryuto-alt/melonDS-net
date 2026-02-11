@@ -11,27 +11,27 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Path settings - melonDS</string>
+   <string>パス設定 - melonDS</string>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="3" column="0">
     <widget class="QLabel" name="label_4">
      <property name="text">
-      <string>Cheat files path:</string>
+      <string>チートファイルパス:</string>
      </property>
     </widget>
    </item>
    <item row="3" column="2">
     <widget class="QPushButton" name="btnCheatFileBrowse">
      <property name="text">
-      <string>Browse...</string>
+      <string>参照...</string>
      </property>
     </widget>
    </item>
    <item row="2" column="0">
     <widget class="QLabel" name="label_3">
      <property name="text">
-      <string>Savestates path:</string>
+      <string>ステートセーブパス:</string>
      </property>
     </widget>
    </item>
@@ -52,7 +52,7 @@
    <item row="1" column="2">
     <widget class="QPushButton" name="btnSaveFileBrowse">
      <property name="text">
-      <string>Browse...</string>
+      <string>参照...</string>
      </property>
     </widget>
    </item>
@@ -76,21 +76,21 @@
    <item row="2" column="2">
     <widget class="QPushButton" name="btnSavestateBrowse">
      <property name="text">
-      <string>Browse...</string>
+      <string>参照...</string>
      </property>
     </widget>
    </item>
    <item row="1" column="0">
     <widget class="QLabel" name="label_2">
      <property name="text">
-      <string>Save files path:</string>
+      <string>セーブファイルパス:</string>
      </property>
     </widget>
    </item>
    <item row="4" column="0" colspan="3">
     <widget class="QLabel" name="label">
      <property name="text">
-      <string>Leave a path blank to use the current ROM's path.</string>
+      <string>パスを空欄にすると現在のROMのパスが使用されます。</string>
      </property>
     </widget>
    </item>
@@ -104,7 +104,7 @@
    <item row="0" column="0" colspan="3">
     <widget class="QLabel" name="lblInstanceNum">
      <property name="text">
-      <string>Configuring paths for instance X</string>
+      <string>インスタンスXのパス設定</string>
      </property>
     </widget>
    </item>

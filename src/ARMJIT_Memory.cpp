@@ -72,7 +72,7 @@
 */
 
 // Yes I know this looks messy, but better here than somewhere else in the code
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(_M_X64)
     #if defined(_WIN32)
         #define CONTEXT_PC Rip
     #elif defined(__linux__)

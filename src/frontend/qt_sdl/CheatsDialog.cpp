@@ -92,7 +92,7 @@ void CheatsDialog::on_btnNewCat_clicked()
 
     ARCodeCat cat;
     cat.Parent = &parentcat;
-    cat.Name = "(new category)";
+    cat.Name = "(新しいカテゴリ)";
     cat.OnlyOneCodeEnabled = false;
 
     parentcat.Children.emplace_back(cat);
@@ -136,7 +136,7 @@ void CheatsDialog::on_btnNewARCode_clicked()
 
     ARCode code;
     code.Parent = cat;
-    code.Name = "(new AR code)";
+    code.Name = "(新しいARコード)";
     code.Enabled = false;
 
     cat->Children.emplace_back(code);
@@ -166,8 +166,8 @@ void CheatsDialog::on_btnDeleteCode_clicked()
     }
 
     QMessageBox::StandardButton res = QMessageBox::question(this,
-                                                            "Confirm deletion",
-                                                            "Really delete the selected item?",
+                                                            "削除の確認",
+                                                            "選択した項目を本当に削除しますか？",
                                                             QMessageBox::Yes|QMessageBox::No,
                                                             QMessageBox::No);
     if (res != QMessageBox::Yes) return;
@@ -222,9 +222,9 @@ void CheatsDialog::on_btnDeleteCode_clicked()
 void CheatsDialog::on_btnImportCheats_clicked()
 {
     QString file = QFileDialog::getOpenFileName(this,
-                                                "Select cheat database...",
+                                                "チートデータベースを選択...",
                                                 emuDirectory,
-                                                "R4 cheat database (*.dat);;Any file (*.*)");
+                                                "R4チートデータベース (*.dat);;すべてのファイル (*.*)");
 
     if (file.isEmpty()) return;
 
@@ -232,7 +232,7 @@ void CheatsDialog::on_btnImportCheats_clicked()
     if (importDB->Error)
     {
         QMessageBox::critical(this, "melonDS",
-                              "Failed to open this cheat database file.");
+                              "このチートデータベースファイルを開けません。");
         delete importDB;
         return;
     }
@@ -240,7 +240,7 @@ void CheatsDialog::on_btnImportCheats_clicked()
     if (!importDB->FindGameCode(gameCode))
     {
         QMessageBox::critical(this, "melonDS",
-                              "No cheat codes were found in this database for the current game.");
+                              "このデータベースには現在のゲームのチートコードが見つかりません。");
         delete importDB;
         return;
     }
@@ -361,7 +361,7 @@ void CheatsDialog::on_btnSaveCode_clicked()
 
     if (ui->txtItemName->text().trimmed().isEmpty())
     {
-        QMessageBox::critical(this, "melonDS", "Error: no name entered.");
+        QMessageBox::critical(this, "melonDS", "エラー: 名前が入力されていません。");
         return;
     }
 
@@ -385,7 +385,7 @@ void CheatsDialog::on_btnSaveCode_clicked()
         auto codeconv = convertCodeInput();
         if (codeconv.empty())
         {
-            QMessageBox::critical(this, "melonDS", "Error: the code entered is empty or invalid.");
+            QMessageBox::critical(this, "melonDS", "エラー: 入力されたコードが空または無効です。");
             return;
         }
 
@@ -466,7 +466,7 @@ void CheatsDialog::populateCheatInfo()
         ui->txtItemDesc->clear();
         ui->txtItemDesc->setReadOnly(true);
 
-        ui->chkItemOption->setText("Enabled");
+        ui->chkItemOption->setText("有効");
         ui->chkItemOption->setChecked(false);
         ui->chkItemOption->setEnabled(false);
 
@@ -498,7 +498,7 @@ void CheatsDialog::populateCheatInfo()
         ui->txtItemDesc->setText(QString::fromStdString(cat->Description));
         ui->txtItemDesc->setReadOnly(true);
 
-        ui->chkItemOption->setText("Only allow one code enabled");
+        ui->chkItemOption->setText("1つのコードのみ有効にする");
         ui->chkItemOption->setChecked(cat->OnlyOneCodeEnabled);
         ui->chkItemOption->setEnabled(false);
 
@@ -521,7 +521,7 @@ void CheatsDialog::populateCheatInfo()
         ui->txtItemDesc->setText(QString::fromStdString(code->Description));
         ui->txtItemDesc->setReadOnly(true);
 
-        ui->chkItemOption->setText("Enabled");
+        ui->chkItemOption->setText("有効");
         ui->chkItemOption->setChecked(code->Enabled);
         ui->chkItemOption->setEnabled(false);
 

@@ -17,7 +17,7 @@
    </sizepolicy>
   </property>
   <property name="windowTitle">
-   <string>Power management - melonDS</string>
+   <string>電源管理 - melonDS</string>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <property name="sizeConstraint">
@@ -36,13 +36,13 @@
    <item row="3" column="0">
     <widget class="QGroupBox" name="grpDSiBattery">
      <property name="title">
-      <string>DSi Battery</string>
+      <string>DSiバッテリー</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_6">
       <item row="1" column="2">
        <widget class="QLabel" name="label_2">
         <property name="text">
-         <string>Almost Empty</string>
+         <string>ほぼ空</string>
         </property>
        </widget>
       </item>
@@ -65,14 +65,14 @@
       <item row="0" column="0" colspan="5">
        <widget class="QCheckBox" name="cbDSiBatteryCharging">
         <property name="text">
-         <string>Charging</string>
+         <string>充電中</string>
         </property>
        </widget>
       </item>
       <item row="1" column="8">
        <widget class="QLabel" name="label_3">
         <property name="text">
-         <string>Full</string>
+         <string>満充電</string>
         </property>
         <property name="alignment">
          <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -82,7 +82,7 @@
       <item row="1" column="0">
        <widget class="QLabel" name="label_1">
         <property name="text">
-         <string>Battery Level</string>
+         <string>バッテリー残量</string>
         </property>
         <property name="alignment">
          <set>Qt::AlignCenter</set>
@@ -192,27 +192,27 @@
    <item row="1" column="0">
     <widget class="QGroupBox" name="grpDSBattery">
      <property name="title">
-      <string>DS Battery</string>
+      <string>DSバッテリー</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_2">
       <item row="1" column="1">
        <widget class="QRadioButton" name="rbDSBatteryLow">
         <property name="text">
-         <string>Low</string>
+         <string>低</string>
         </property>
        </widget>
       </item>
       <item row="0" column="0" rowspan="2">
        <widget class="QLabel" name="label">
         <property name="text">
-         <string>Battery Level</string>
+         <string>バッテリー残量</string>
         </property>
        </widget>
       </item>
       <item row="0" column="1">
        <widget class="QRadioButton" name="rbDSBatteryOkay">
         <property name="text">
-         <string>Okay</string>
+         <string>正常</string>
         </property>
        </widget>
       </item>
@@ -228,7 +228,7 @@
       </sizepolicy>
      </property>
      <property name="text">
-      <string>Configuring settings for instance X</string>
+      <string>インスタンスXの設定</string>
      </property>
     </widget>
    </item>

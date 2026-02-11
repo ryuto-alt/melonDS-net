@@ -82,8 +82,8 @@ CameraSettingsDialog::CameraSettingsDialog(QWidget* parent) : QDialog(parent), u
         oldCamSettings[i].XFlip = cfg.GetBool("XFlip");
     }
 
-    ui->cbCameraSel->addItem("DSi outer camera");
-    ui->cbCameraSel->addItem("DSi inner camera");
+    ui->cbCameraSel->addItem(QString::fromUtf8("DSi外側カメラ"));
+    ui->cbCameraSel->addItem(QString::fromUtf8("DSi内側カメラ"));
 
 #if QT_VERSION >= 0x060000
     const QList<QCameraDevice> cameras = QMediaDevices::videoInputs();
@@ -95,9 +95,9 @@ CameraSettingsDialog::CameraSettingsDialog(QWidget* parent) : QDialog(parent), u
         {
             name += " (";
             if (pos == QCameraDevice::FrontFace)
-                name += "inner camera";
+                name += QString::fromUtf8("内側カメラ");
             else if (pos == QCameraDevice::BackFace)
-                name += "outer camera";
+                name += QString::fromUtf8("外側カメラ");
             name += ")";
         }
 
@@ -113,9 +113,9 @@ CameraSettingsDialog::CameraSettingsDialog(QWidget* parent) : QDialog(parent), u
         {
             name += " (";
             if (pos == QCamera::FrontFace)
-                name += "inner camera";
+                name += QString::fromUtf8("内側カメラ");
             else if (pos == QCamera::BackFace)
-                name += "outer camera";
+                name += QString::fromUtf8("外側カメラ");
             name += ")";
         }
 
@@ -256,9 +256,9 @@ void CameraSettingsDialog::on_txtSrcImagePath_textChanged()
 void CameraSettingsDialog::on_btnSrcImageBrowse_clicked()
 {
     QString file = QFileDialog::getOpenFileName(this,
-                                                "Select image file...",
+                                                QString::fromUtf8("画像ファイルを選択..."),
                                                 emuDirectory,
-                                                "Image files (*.png *.jpg *.jpeg *.bmp);;Any file (*.*)");
+                                                QString::fromUtf8("画像ファイル (*.png *.jpg *.jpeg *.bmp);;すべてのファイル (*.*)"));
 
     if (file.isEmpty()) return;
 

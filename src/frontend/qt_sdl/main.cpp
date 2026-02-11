@@ -27,7 +27,6 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <winhttp.h>
-#include <shellapi.h>
 #endif
 
 #include <QApplication>
@@ -38,6 +37,7 @@
 #include <QInputDialog>
 #include <QPainter>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QMimeData>
 #include <QVector>
 #include <QCommandLineParser>
@@ -293,34 +293,44 @@ static void writeLocalVersion(int ver)
 
 static int checkRemoteVersion()
 {
+    // Use GitHub API releases/latest (no CDN cache, always real-time)
     HINTERNET hSession = WinHttpOpen(L"melonDS-updater/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
     if (!hSession) return -1;
 
     HINTERNET hConnect = WinHttpConnect(hSession,
-        L"raw.githubusercontent.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
+        L"api.github.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
     if (!hConnect) { WinHttpCloseHandle(hSession); return -1; }
 
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET",
-        L"/ryuto-alt/melonDS-net/main/version.txt",
+        L"/repos/ryuto-alt/melonDS-net/releases/latest",
         NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
     if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return -1; }
 
-    if (!WinHttpSendRequest(hRequest, NULL, 0, NULL, 0, 0, 0) ||
+    const wchar_t* headers = L"User-Agent: melonDS-updater/1.0\r\n";
+    if (!WinHttpSendRequest(hRequest, headers, -1, NULL, 0, 0, 0) ||
         !WinHttpReceiveResponse(hRequest, NULL))
     {
         WinHttpCloseHandle(hRequest); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession);
         return -1;
     }
 
-    char buf[64] = {0};
-    DWORD bytesRead = 0;
-    WinHttpReadData(hRequest, buf, sizeof(buf) - 1, &bytesRead);
+    char buf[8192] = {0};
+    DWORD totalRead = 0, bytesRead = 0;
+    while (totalRead < sizeof(buf) - 1 &&
+           WinHttpReadData(hRequest, buf + totalRead, sizeof(buf) - totalRead - 1, &bytesRead) && bytesRead > 0)
+        totalRead += bytesRead;
 
     WinHttpCloseHandle(hRequest);
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
-    return atoi(buf);
+
+    // Parse "tag_name":"v<number>" from JSON response
+    const char* tag = strstr(buf, "\"tag_name\"");
+    if (!tag) return -1;
+    const char* v = strchr(tag, 'v');
+    if (!v) return -1;
+    return atoi(v + 1);
 }
 
 static bool downloadRelease(int version)
@@ -409,56 +419,173 @@ static bool downloadRelease(int version)
     return true;
 }
 
+static void createDirectoryRecursiveW(const std::wstring& path)
+{
+    size_t pos = 0;
+    while ((pos = path.find(L'\\', pos + 1)) != std::wstring::npos)
+        CreateDirectoryW(path.substr(0, pos).c_str(), NULL);
+    CreateDirectoryW(path.c_str(), NULL);
+}
+
+static bool extractZipToDir(const char* zipPath, const std::wstring& destDir)
+{
+    struct archive* a = archive_read_new();
+    archive_read_support_format_zip(a);
+    archive_read_support_filter_all(a);
+
+    if (archive_read_open_filename(a, zipPath, 10240) != ARCHIVE_OK)
+    {
+        archive_read_free(a);
+        return false;
+    }
+
+    CreateDirectoryW(destDir.c_str(), NULL);
+
+    struct archive_entry* entry;
+    while (archive_read_next_header(a, &entry) == ARCHIVE_OK)
+    {
+        const char* entryName = archive_entry_pathname(entry);
+        int len = MultiByteToWideChar(CP_UTF8, 0, entryName, -1, NULL, 0);
+        std::wstring wName(len - 1, 0);
+        MultiByteToWideChar(CP_UTF8, 0, entryName, -1, &wName[0], len);
+
+        for (auto& c : wName) if (c == L'/') c = L'\\';
+        while (!wName.empty() && wName.back() == L'\\') wName.pop_back();
+        if (wName.empty()) continue;
+
+        std::wstring fullPath = destDir + L"\\" + wName;
+
+        if (archive_entry_filetype(entry) == AE_IFDIR)
+        {
+            createDirectoryRecursiveW(fullPath);
+        }
+        else
+        {
+            size_t pos = fullPath.rfind(L'\\');
+            if (pos != std::wstring::npos)
+                createDirectoryRecursiveW(fullPath.substr(0, pos));
+
+            FILE* f = _wfopen(fullPath.c_str(), L"wb");
+            if (f)
+            {
+                const void* buf;
+                size_t size;
+                la_int64_t offset;
+                while (archive_read_data_block(a, &buf, &size, &offset) == ARCHIVE_OK)
+                    fwrite(buf, 1, size, f);
+                fclose(f);
+            }
+        }
+    }
+
+    archive_read_free(a);
+    return true;
+}
+
+static void removeDirectoryRecursiveW(const std::wstring& dir)
+{
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+    do
+    {
+        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+        std::wstring full = dir + L"\\" + fd.cFileName;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            removeDirectoryRecursiveW(full);
+        else
+            DeleteFileW(full.c_str());
+    } while (FindNextFileW(hFind, &fd));
+    FindClose(hFind);
+    RemoveDirectoryW(dir.c_str());
+}
+
+static void copyUpdateFiles(const std::wstring& src, const std::wstring& dst)
+{
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW((src + L"\\*").c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+    do
+    {
+        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+        std::wstring srcPath = src + L"\\" + fd.cFileName;
+        std::wstring dstPath = dst + L"\\" + fd.cFileName;
+
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            if (_wcsicmp(fd.cFileName, L"BIOS") == 0) continue;
+            CreateDirectoryW(dstPath.c_str(), NULL);
+            copyUpdateFiles(srcPath, dstPath);
+        }
+        else
+        {
+            if (_wcsicmp(fd.cFileName, L"melonDS.toml") == 0) continue;
+            if (_wcsicmp(fd.cFileName, L"version.txt") == 0) continue;
+
+            if (_wcsicmp(fd.cFileName, L"melonDS.exe") == 0)
+                MoveFileW(dstPath.c_str(), (dst + L"\\melonDS.exe.old").c_str());
+
+            CopyFileW(srcPath.c_str(), dstPath.c_str(), FALSE);
+        }
+    } while (FindNextFileW(hFind, &fd));
+    FindClose(hFind);
+}
+
 static void checkForUpdates()
 {
+    // Set working directory to exe's directory (not relying on CWD)
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    std::wstring exeDir(exePath, lastSlash ? lastSlash : exePath + wcslen(exePath));
+    SetCurrentDirectoryW(exeDir.c_str());
+
+    // Cleanup from previous update
+    DeleteFileW(L"melonDS.exe.old");
+
     int localVer = readLocalVersion();
     int remoteVer = checkRemoteVersion();
 
     if (remoteVer <= 0 || remoteVer <= localVer)
         return;
 
-    QString msg = QString("melonDS v%1 が利用可能です！（現在: v%2）\n今すぐ更新しますか？")
-        .arg(remoteVer).arg(localVer);
-
-    if (QMessageBox::question(nullptr, "melonDS Update", msg,
-            QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
-        return;
-
-    QMessageBox* progress = new QMessageBox(QMessageBox::Information,
-        "melonDS Update", "ダウンロード中...", QMessageBox::NoButton);
-    progress->show();
+    // Show splash (no dialog, no CMD)
+    QLabel* splash = new QLabel(QString("melonDS \u3092\u66f4\u65b0\u4e2d... (v%1 \u2192 v%2)").arg(localVer).arg(remoteVer));
+    splash->setWindowFlags(Qt::SplashScreen | Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint);
+    splash->setAlignment(Qt::AlignCenter);
+    splash->setFixedSize(350, 80);
+    splash->setStyleSheet("background-color: #2d2d2d; color: white; font-size: 14px; padding: 20px;");
+    splash->show();
     QApplication::processEvents();
 
     if (!downloadRelease(remoteVer))
     {
-        delete progress;
-        QMessageBox::warning(nullptr, "melonDS Update", "ダウンロードに失敗しました。");
+        delete splash;
         return;
     }
 
-    delete progress;
+    splash->setText(QString::fromUtf8("\u66f4\u65b0\u3092\u9069\u7528\u4e2d..."));
+    QApplication::processEvents();
 
-    // Extract and apply (keep config, BIOS, saves)
-    system("powershell -NoProfile -Command \""
-        "Expand-Archive -Path '_update.zip' -DestinationPath '_update_tmp' -Force"
-        "\" 2>nul || python3 -c \""
-        "import zipfile,os; z=zipfile.ZipFile('_update.zip'); z.extractall('_update_tmp'); z.close()\"");
+    std::wstring tmpDir = exeDir + L"\\_update_tmp";
 
-    system("robocopy _update_tmp . /E /XF melonDS.toml version.txt /XD BIOS _update_tmp >nul 2>&1");
-
+    extractZipToDir("_update.zip", tmpDir);
+    copyUpdateFiles(tmpDir, exeDir);
     writeLocalVersion(remoteVer);
 
     // Cleanup
-    system("rmdir /s /q _update_tmp >nul 2>&1");
+    removeDirectoryRecursiveW(tmpDir);
     DeleteFileA("_update.zip");
 
-    QMessageBox::information(nullptr, "melonDS Update",
-        QString("v%1 に更新しました！\n再起動してください。").arg(remoteVer));
+    delete splash;
 
-    // Restart
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(NULL, exePath, MAX_PATH);
-    ShellExecuteW(NULL, L"open", exePath, NULL, NULL, SW_SHOW);
+    // Restart silently
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+    CreateProcessW(exePath, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
     exit(0);
 }
 #endif

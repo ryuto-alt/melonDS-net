@@ -17,7 +17,7 @@
    </sizepolicy>
   </property>
   <property name="windowTitle">
-   <string>Video settings - melonDS</string>
+   <string>映像設定 - melonDS</string>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <property name="sizeConstraint">
@@ -29,13 +29,13 @@
    <item row="1" column="1">
     <widget class="QGroupBox" name="groupBox_3">
      <property name="title">
-      <string>OpenGL renderer</string>
+      <string>OpenGLレンダラー</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_4">
       <item row="0" column="0">
        <widget class="QLabel" name="label_3">
         <property name="text">
-         <string>Internal resolution:</string>
+         <string>内部解像度:</string>
         </property>
        </widget>
       </item>
@@ -45,7 +45,7 @@
          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Enabling this may help reduce distortion on quads and more complex polygons, but may also reduce performance.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
         </property>
         <property name="text">
-         <string>Improved polygon splitting</string>
+         <string>ポリゴン分割の改善</string>
         </property>
        </widget>
       </item>
@@ -59,7 +59,7 @@
       <item row="3" column="0">
        <widget class="QCheckBox" name="cbxComputeHiResCoords">
         <property name="text">
-         <string>Use high resolution coordinates</string>
+         <string>高解像度座標を使用</string>
         </property>
        </widget>
       </item>
@@ -69,7 +69,7 @@
    <item row="0" column="1">
     <widget class="QGroupBox" name="groupBox_2">
      <property name="title">
-      <string>Software renderer</string>
+      <string>ソフトウェアレンダラー</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_3">
       <item row="0" column="0">
@@ -78,7 +78,7 @@
          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Run the software renderer on a separate thread. Yields better performance on multi-core CPUs.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
         </property>
         <property name="text">
-         <string>Use separate thread</string>
+         <string>別スレッドを使用</string>
         </property>
        </widget>
       </item>
@@ -98,7 +98,7 @@
    <item row="0" column="0" rowspan="3" alignment="Qt::AlignmentFlag::AlignTop">
     <widget class="QGroupBox" name="groupBox">
      <property name="title">
-      <string>Display settings</string>
+      <string>ディスプレイ設定</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_2">
       <item row="7" column="1">
@@ -120,7 +120,7 @@
          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use OpenGL to draw the DS screens to the main window. May result in better frame pacing. Mandatory when using the OpenGL 3D renderer.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
         </property>
         <property name="text">
-         <string>OpenGL display</string>
+         <string>OpenGLディスプレイ</string>
         </property>
        </widget>
       </item>
@@ -162,7 +162,7 @@
          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;The interval at which to synchronize to the monitor's refresh rate. Set to 1 for a 60Hz monitor, 2 for 120Hz, ...&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
         </property>
         <property name="text">
-         <string>VSync interval:</string>
+         <string>VSync間隔:</string>
         </property>
        </widget>
       </item>
@@ -182,21 +182,21 @@
          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;The software renderer is more accurate and less prone to rendering glitches, but requires more CPU power.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
         </property>
         <property name="text">
-         <string>Software</string>
+         <string>ソフトウェア</string>
         </property>
        </widget>
       </item>
       <item row="0" column="0" colspan="2">
        <widget class="QLabel" name="label">
         <property name="text">
-         <string>Renderer:</string>
+         <string>レンダラー:</string>
         </property>
        </widget>
       </item>
       <item row="3" column="0">
        <widget class="QRadioButton" name="rb3DCompute">
         <property name="text">
-         <string>OpenGL (Compute shader)</string>
+         <string>OpenGL (コンピュートシェーダー)</string>
         </property>
        </widget>
       </item>

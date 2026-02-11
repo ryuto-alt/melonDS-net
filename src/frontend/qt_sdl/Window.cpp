@@ -278,9 +278,9 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
     {
         QMenuBar * menubar = new QMenuBar();
         {
-            QMenu * menu = menubar->addMenu("File");
+            QMenu * menu = menubar->addMenu("ファイル");
 
-            actOpenROM = menu->addAction("Open ROM...");
+            actOpenROM = menu->addAction("ROMを開く...");
             connect(actOpenROM, &QAction::triggered, this, &MainWindow::onOpenFile);
             actOpenROM->setShortcut(QKeySequence(QKeySequence::StandardKey::Open));
 
@@ -288,34 +288,34 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
             connect(actOpenROMArchive, &QAction::triggered, this, &MainWindow::onOpenFileArchive);
             actOpenROMArchive->setShortcut(QKeySequence(Qt::Key_O | Qt::CTRL | Qt::SHIFT));*/
 
-            recentMenu = menu->addMenu("Open recent");
+            recentMenu = menu->addMenu("最近開いたファイル");
             loadRecentFilesMenu(true);
 
             //actBootFirmware = menu->addAction("Launch DS menu");
-            actBootFirmware = menu->addAction("Boot firmware");
+            actBootFirmware = menu->addAction("ファームウェアを起動");
             connect(actBootFirmware, &QAction::triggered, this, &MainWindow::onBootFirmware);
 
             menu->addSeparator();
 
-            actCurrentCart = menu->addAction("DS slot: " + emuInstance->cartLabel());
+            actCurrentCart = menu->addAction("DSスロット: " + emuInstance->cartLabel());
             actCurrentCart->setEnabled(false);
 
-            actInsertCart = menu->addAction("Insert cart...");
+            actInsertCart = menu->addAction("カートリッジを挿入...");
             connect(actInsertCart, &QAction::triggered, this, &MainWindow::onInsertCart);
 
-            actEjectCart = menu->addAction("Eject cart");
+            actEjectCart = menu->addAction("カートリッジを取り出す");
             connect(actEjectCart, &QAction::triggered, this, &MainWindow::onEjectCart);
 
             menu->addSeparator();
 
-            actCurrentGBACart = menu->addAction("GBA slot: " + emuInstance->gbaCartLabel());
+            actCurrentGBACart = menu->addAction("GBAスロット: " + emuInstance->gbaCartLabel());
             actCurrentGBACart->setEnabled(false);
 
-            actInsertGBACart = menu->addAction("Insert ROM cart...");
+            actInsertGBACart = menu->addAction("ROMカートリッジを挿入...");
             connect(actInsertGBACart, &QAction::triggered, this, &MainWindow::onInsertGBACart);
 
             {
-                QMenu * submenu = menu->addMenu("Insert add-on cart");
+                QMenu * submenu = menu->addMenu("拡張カートリッジを挿入");
                 QAction *act;
 
                 int addons[] = {
@@ -340,18 +340,18 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
                 }
             }
 
-            actEjectGBACart = menu->addAction("Eject cart");
+            actEjectGBACart = menu->addAction("カートリッジを取り出す");
             connect(actEjectGBACart, &QAction::triggered, this, &MainWindow::onEjectGBACart);
 
             menu->addSeparator();
 
-            actImportSavefile = menu->addAction("Import savefile");
+            actImportSavefile = menu->addAction("セーブファイルをインポート");
             connect(actImportSavefile, &QAction::triggered, this, &MainWindow::onImportSavefile);
 
             menu->addSeparator();
 
             {
-                QMenu * submenu = menu->addMenu("Save state");
+                QMenu * submenu = menu->addMenu("ステートセーブ");
 
                 for (int i = 1; i < 9; i++)
                 {
@@ -361,13 +361,13 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
                     connect(actSaveState[i], &QAction::triggered, this, &MainWindow::onSaveState);
                 }
 
-                actSaveState[0] = submenu->addAction("File...");
+                actSaveState[0] = submenu->addAction("ファイル...");
                 actSaveState[0]->setShortcut(QKeySequence(Qt::ShiftModifier | Qt::Key_F9));
                 actSaveState[0]->setData(QVariant(0));
                 connect(actSaveState[0], &QAction::triggered, this, &MainWindow::onSaveState);
             }
             {
-                QMenu * submenu = menu->addMenu("Load state");
+                QMenu * submenu = menu->addMenu("ステートロード");
 
                 for (int i = 1; i < 9; i++)
                 {
@@ -377,18 +377,18 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
                     connect(actLoadState[i], &QAction::triggered, this, &MainWindow::onLoadState);
                 }
 
-                actLoadState[0] = submenu->addAction("File...");
+                actLoadState[0] = submenu->addAction("ファイル...");
                 actLoadState[0]->setShortcut(QKeySequence(Qt::Key_F9));
                 actLoadState[0]->setData(QVariant(0));
                 connect(actLoadState[0], &QAction::triggered, this, &MainWindow::onLoadState);
             }
 
-            actUndoStateLoad = menu->addAction("Undo state load");
+            actUndoStateLoad = menu->addAction("ステートロードを取り消す");
             actUndoStateLoad->setShortcut(QKeySequence(Qt::Key_F12));
             connect(actUndoStateLoad, &QAction::triggered, this, &MainWindow::onUndoStateLoad);
 
             menu->addSeparator();
-            actOpenConfig = menu->addAction("Open melonDS directory");
+            actOpenConfig = menu->addAction("melonDSフォルダを開く");
             connect(actOpenConfig, &QAction::triggered, this, [&]()
             {
                 QDesktopServices::openUrl(QUrl::fromLocalFile(emuDirectory));
@@ -396,70 +396,70 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
             menu->addSeparator();
 
-            actQuit = menu->addAction("Quit");
+            actQuit = menu->addAction("終了");
             connect(actQuit, &QAction::triggered, this, &MainWindow::onQuit);
             actQuit->setShortcut(QKeySequence(QKeySequence::StandardKey::Quit));
         }
         {
-            QMenu * menu = menubar->addMenu("System");
+            QMenu * menu = menubar->addMenu("システム");
 
-            actPause = menu->addAction("Pause");
+            actPause = menu->addAction("一時停止");
             actPause->setCheckable(true);
             connect(actPause, &QAction::triggered, this, &MainWindow::onPause);
 
-            actReset = menu->addAction("Reset");
+            actReset = menu->addAction("リセット");
             connect(actReset, &QAction::triggered, this, &MainWindow::onReset);
 
-            actStop = menu->addAction("Stop");
+            actStop = menu->addAction("停止");
             connect(actStop, &QAction::triggered, this, &MainWindow::onStop);
 
-            actFrameStep = menu->addAction("Frame step");
+            actFrameStep = menu->addAction("フレーム送り");
             connect(actFrameStep, &QAction::triggered, this, &MainWindow::onFrameStep);
 
             menu->addSeparator();
 
-            actPowerManagement = menu->addAction("Power management");
+            actPowerManagement = menu->addAction("電源管理");
             connect(actPowerManagement, &QAction::triggered, this, &MainWindow::onOpenPowerManagement);
 
-            actDateTime = menu->addAction("Date and time");
+            actDateTime = menu->addAction("日付と時刻");
             connect(actDateTime, &QAction::triggered, this, &MainWindow::onOpenDateTime);
 
             menu->addSeparator();
 
-            actEnableCheats = menu->addAction("Enable cheats");
+            actEnableCheats = menu->addAction("チート有効");
             actEnableCheats->setCheckable(true);
             connect(actEnableCheats, &QAction::triggered, this, &MainWindow::onEnableCheats);
 
             //if (inst == 0)
             {
-                actSetupCheats = menu->addAction("Setup cheat codes");
+                actSetupCheats = menu->addAction("チートコード設定");
                 actSetupCheats->setMenuRole(QAction::NoRole);
                 connect(actSetupCheats, &QAction::triggered, this, &MainWindow::onSetupCheats);
 
                 menu->addSeparator();
-                actROMInfo = menu->addAction("ROM info");
+                actROMInfo = menu->addAction("ROM情報");
                 connect(actROMInfo, &QAction::triggered, this, &MainWindow::onROMInfo);
 
-                actRAMInfo = menu->addAction("RAM search");
+                actRAMInfo = menu->addAction("RAMサーチ");
                 connect(actRAMInfo, &QAction::triggered, this, &MainWindow::onRAMInfo);
 
-                actTitleManager = menu->addAction("Manage DSi titles");
+                actTitleManager = menu->addAction("DSiタイトル管理");
                 connect(actTitleManager, &QAction::triggered, this, &MainWindow::onOpenTitleManager);
             }
 
             {
                 menu->addSeparator();
-                QMenu * submenu = menu->addMenu("Multiplayer");
+                QMenu * submenu = menu->addMenu("マルチプレイヤー");
 
-                actMPNewInstance = submenu->addAction("Launch new instance");
+                actMPNewInstance = submenu->addAction("新しいインスタンスを起動");
                 connect(actMPNewInstance, &QAction::triggered, this, &MainWindow::onMPNewInstance);
 
                 submenu->addSeparator();
 
-                actLANStartHost = submenu->addAction("Host LAN game");
+                actLANStartHost = submenu->addAction("LANゲームをホスト");
                 connect(actLANStartHost, &QAction::triggered, this, &MainWindow::onLANStartHost);
 
-                actLANStartClient = submenu->addAction("Join LAN game");
+                actLANStartClient = submenu->addAction("LANゲームに参加");
                 connect(actLANStartClient, &QAction::triggered, this, &MainWindow::onLANStartClient);
 
                 /*submenu->addSeparator();
@@ -475,10 +475,10 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
             }
         }
         {
-            QMenu * menu = menubar->addMenu("View");
+            QMenu * menu = menubar->addMenu("表示");
 
             {
-                QMenu * submenu = menu->addMenu("Screen size");
+                QMenu * submenu = menu->addMenu("画面サイズ");
 
                 for (int i = 0; i < 4; i++)
                 {
@@ -489,7 +489,7 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
                 }
             }
             {
-                QMenu * submenu = menu->addMenu("Screen rotation");
+                QMenu * submenu = menu->addMenu("画面回転");
                 grpScreenRotation = new QActionGroup(submenu);
 
                 for (int i = 0; i < screenRot_MAX; i++)
@@ -504,7 +504,7 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
                 connect(grpScreenRotation, &QActionGroup::triggered, this, &MainWindow::onChangeScreenRotation);
             }
             {
-                QMenu * submenu = menu->addMenu("Screen gap");
+                QMenu * submenu = menu->addMenu("画面間隔");
                 grpScreenGap = new QActionGroup(submenu);
 
                 const int screengap[] = {0, 1, 8, 64, 90, 128};
@@ -521,10 +521,10 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
                 connect(grpScreenGap, &QActionGroup::triggered, this, &MainWindow::onChangeScreenGap);
             }
             {
-                QMenu * submenu = menu->addMenu("Screen layout");
+                QMenu * submenu = menu->addMenu("画面レイアウト");
                 grpScreenLayout = new QActionGroup(submenu);
 
-                const char *screenlayout[] = {"Natural", "Vertical", "Horizontal", "Hybrid"};
+                const char *screenlayout[] = {"自動", "縦", "横", "ハイブリッド"};
 
                 for (int i = 0; i < screenLayout_MAX; i++)
                 {
@@ -538,16 +538,16 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
                 submenu->addSeparator();
 
-                actScreenSwap = submenu->addAction("Swap screens");
+                actScreenSwap = submenu->addAction("画面入れ替え");
                 actScreenSwap->setCheckable(true);
                 connect(actScreenSwap, &QAction::triggered, this, &MainWindow::onChangeScreenSwap);
             }
             {
-                QMenu * submenu = menu->addMenu("Screen sizing");
+                QMenu * submenu = menu->addMenu("画面サイズ調整");
                 grpScreenSizing = new QActionGroup(submenu);
 
-                const char *screensizing[] = {"Even", "Emphasize top", "Emphasize bottom", "Auto", "Top only",
-                                              "Bottom only"};
+                const char *screensizing[] = {"均等", "上画面優先", "下画面優先", "自動", "上画面のみ",
+                                              "下画面のみ"};
 
                 for (int i = 0; i < screenSizing_MAX; i++)
                 {
@@ -561,12 +561,12 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
                 submenu->addSeparator();
 
-                actIntegerScaling = submenu->addAction("Force integer scaling");
+                actIntegerScaling = submenu->addAction("整数倍スケーリング");
                 actIntegerScaling->setCheckable(true);
                 connect(actIntegerScaling, &QAction::triggered, this, &MainWindow::onChangeIntegerScaling);
             }
             {
-                QMenu * submenu = menu->addMenu("Aspect ratio");
+                QMenu * submenu = menu->addMenu("アスペクト比");
                 grpScreenAspectTop = new QActionGroup(submenu);
                 grpScreenAspectBot = new QActionGroup(submenu);
                 actScreenAspectTop = new QAction *[AspectRatiosNum];
@@ -587,7 +587,7 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
                     for (int j = 0; j < AspectRatiosNum; j++)
                     {
                         auto ratio = aspectRatios[j];
-                        QString label = QString("%1 %2").arg(i ? "Bottom" : "Top", ratio.label);
+                        QString label = QString("%1 %2").arg(i ? "下" : "上", ratio.label);
                         actions[j] = submenu->addAction(label);
                         actions[j]->setActionGroup(group);
                         actions[j]->setData(QVariant(ratio.id));
@@ -600,23 +600,23 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
             menu->addSeparator();
 
-            actNewWindow = menu->addAction("Open new window");
+            actNewWindow = menu->addAction("新しいウィンドウを開く");
             connect(actNewWindow, &QAction::triggered, this, &MainWindow::onOpenNewWindow);
 
             menu->addSeparator();
 
-            actScreenFiltering = menu->addAction("Screen filtering");
+            actScreenFiltering = menu->addAction("画面フィルタリング");
             actScreenFiltering->setCheckable(true);
             connect(actScreenFiltering, &QAction::triggered, this, &MainWindow::onChangeScreenFiltering);
 
-            actShowOSD = menu->addAction("Show OSD");
+            actShowOSD = menu->addAction("OSD表示");
             actShowOSD->setCheckable(true);
             connect(actShowOSD, &QAction::triggered, this, &MainWindow::onChangeShowOSD);
         }
         {
-            QMenu * menu = menubar->addMenu("Config");
+            QMenu * menu = menubar->addMenu("設定");
 
-            actEmuSettings = menu->addAction("Emu settings");
+            actEmuSettings = menu->addAction("エミュレーション設定");
             connect(actEmuSettings, &QAction::triggered, this, &MainWindow::onOpenEmuSettings);
 
 #ifdef __APPLE__
@@ -625,46 +625,46 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
             actPreferences->setMenuRole(QAction::PreferencesRole);
 #endif
 
-            actInputConfig = menu->addAction("Input and hotkeys");
+            actInputConfig = menu->addAction("入力とホットキー");
             connect(actInputConfig, &QAction::triggered, this, &MainWindow::onOpenInputConfig);
 
-            actVideoSettings = menu->addAction("Video settings");
+            actVideoSettings = menu->addAction("映像設定");
             connect(actVideoSettings, &QAction::triggered, this, &MainWindow::onOpenVideoSettings);
 
-            actCameraSettings = menu->addAction("Camera settings");
+            actCameraSettings = menu->addAction("カメラ設定");
             connect(actCameraSettings, &QAction::triggered, this, &MainWindow::onOpenCameraSettings);
 
-            actAudioSettings = menu->addAction("Audio settings");
+            actAudioSettings = menu->addAction("音声設定");
             connect(actAudioSettings, &QAction::triggered, this, &MainWindow::onOpenAudioSettings);
 
-            actMPSettings = menu->addAction("Multiplayer settings");
+            actMPSettings = menu->addAction("マルチプレイヤー設定");
             connect(actMPSettings, &QAction::triggered, this, &MainWindow::onOpenMPSettings);
 
-            actWifiSettings = menu->addAction("Wifi settings");
+            actWifiSettings = menu->addAction("Wi-Fi設定");
             connect(actWifiSettings, &QAction::triggered, this, &MainWindow::onOpenWifiSettings);
 
-            actFirmwareSettings = menu->addAction("Firmware settings");
+            actFirmwareSettings = menu->addAction("ファームウェア設定");
             connect(actFirmwareSettings, &QAction::triggered, this, &MainWindow::onOpenFirmwareSettings);
 
-            actInterfaceSettings = menu->addAction("Interface settings");
+            actInterfaceSettings = menu->addAction("インターフェース設定");
             connect(actInterfaceSettings, &QAction::triggered, this, &MainWindow::onOpenInterfaceSettings);
 
-            actPathSettings = menu->addAction("Path settings");
+            actPathSettings = menu->addAction("パス設定");
             connect(actPathSettings, &QAction::triggered, this, &MainWindow::onOpenPathSettings);
 
             menu->addSeparator();
 
-            actLimitFramerate = menu->addAction("Limit framerate");
+            actLimitFramerate = menu->addAction("フレームレート制限");
             actLimitFramerate->setCheckable(true);
             connect(actLimitFramerate, &QAction::triggered, this, &MainWindow::onChangeLimitFramerate);
 
-            actAudioSync = menu->addAction("Audio sync");
+            actAudioSync = menu->addAction("音声同期");
             actAudioSync->setCheckable(true);
             connect(actAudioSync, &QAction::triggered, this, &MainWindow::onChangeAudioSync);
         }
         {
-            QMenu * menu = menubar->addMenu("Help");
-            actAbout = menu->addAction("About...");
+            QMenu * menu = menubar->addMenu("ヘルプ");
+            actAbout = menu->addAction("バージョン情報...");
             connect(actAbout, &QAction::triggered, this, [&]
             {
                 auto dialog = AboutDialog(this);
@@ -1042,7 +1042,7 @@ void MainWindow::dropEvent(QDropEvent* event)
     }
     else
     {
-        QMessageBox::critical(this, "melonDS", "The file could not be recognized as a DS or GBA ROM.");
+        QMessageBox::critical(this, "melonDS", "このファイルはDSまたはGBA ROMとして認識できません。");
         return;
     }
 }
@@ -1175,7 +1175,7 @@ QStringList MainWindow::splitArchivePath(const QString& filename, bool useMember
         const QStringList filenameParts = filename.split('|');
         if (filenameParts.size() > 2)
         {
-            QMessageBox::warning(this, "melonDS", "This path contains too many '|'.");
+            QMessageBox::warning(this, "melonDS", "このパスには'|'が多すぎます。");
             return {};
         }
 
@@ -1184,14 +1184,14 @@ QStringList MainWindow::splitArchivePath(const QString& filename, bool useMember
             const QString archive = filenameParts.at(0);
             if (!QFileInfo(archive).exists())
             {
-                QMessageBox::warning(this, "melonDS", "This archive does not exist.");
+                QMessageBox::warning(this, "melonDS", "このアーカイブは存在しません。");
                 return {};
             }
 
             const QString subfile = filenameParts.at(1);
             if (!Archive::ListArchive(archive).contains(subfile))
             {
-                QMessageBox::warning(this, "melonDS", "This archive does not contain the desired file.");
+                QMessageBox::warning(this, "melonDS", "このアーカイブには指定されたファイルが含まれていません。");
                 return {};
             }
 
@@ -1202,7 +1202,7 @@ QStringList MainWindow::splitArchivePath(const QString& filename, bool useMember
 
     if (!QFileInfo(filename).exists())
     {
-        QMessageBox::warning(this, "melonDS", "This ROM file does not exist.");
+        QMessageBox::warning(this, "melonDS", "このROMファイルは存在しません。");
         return {};
     }
 
@@ -1228,9 +1228,9 @@ QString MainWindow::pickFileFromArchive(QString archiveFileName)
     if (archiveROMList.size() <= 1)
     {
         if (!archiveROMList.isEmpty() && archiveROMList.at(0) == "OK")
-            QMessageBox::warning(this, "melonDS", "This archive is empty.");
+            QMessageBox::warning(this, "melonDS", "このアーカイブは空です。");
         else
-            QMessageBox::critical(this, "melonDS", "This archive could not be read. It may be corrupt or you don't have the permissions.");
+            QMessageBox::critical(this, "melonDS", "このアーカイブを読み込めません。ファイルが破損しているか、権限がない可能性があります。");
         return QString();
     }
 
@@ -1248,7 +1248,7 @@ QString MainWindow::pickFileFromArchive(QString archiveFileName)
 
     if (archiveROMList.isEmpty())
     {
-        QMessageBox::warning(this, "melonDS", "This archive does not contain any supported ROMs.");
+        QMessageBox::warning(this, "melonDS", "このアーカイブにはサポートされているROMが含まれていません。");
         return QString();
     }
 
@@ -1258,7 +1258,7 @@ QString MainWindow::pickFileFromArchive(QString archiveFileName)
     bool ok;
     const QString toLoad = QInputDialog::getItem(
         this, "melonDS",
-        "This archive contains multiple files. Select which ROM you want to load.",
+        "このアーカイブには複数のファイルが含まれています。読み込むROMを選択してください。",
         archiveROMList.toList(), 0, false, &ok
     );
 
@@ -1292,7 +1292,7 @@ QStringList MainWindow::pickROM(bool gba)
     extraFilters += ";;All files (*.*)";
 
     const QString filename = QFileDialog::getOpenFileName(
-        this, "Open " + console + " ROM",
+        this, console + " ROMを開く",
         globalCfg.GetQString("LastROMFolder"),
         "All supported files (*" + allROMs + ")" + extraFilters
     );
@@ -1316,7 +1316,7 @@ void MainWindow::updateCartInserted(bool gba)
     if (gba)
     {
         inserted = emuInstance->gbaCartInserted() && (emuInstance->getConsoleType() == 0);
-        label = "GBA slot: " + emuInstance->gbaCartLabel();
+        label = "GBAスロット: " + emuInstance->gbaCartLabel();
 
         emuInstance->doOnAllWindows([=](MainWindow* win)
         {
@@ -1328,7 +1328,7 @@ void MainWindow::updateCartInserted(bool gba)
     else
     {
         inserted = emuInstance->cartInserted();
-        label = "DS slot: " + emuInstance->cartLabel();
+        label = "DSスロット: " + emuInstance->cartLabel();
 
         emuInstance->doOnAllWindows([=](MainWindow* win)
         {
@@ -1429,7 +1429,7 @@ void MainWindow::loadRecentFilesMenu(bool loadcfg)
 
     recentMenu->addSeparator();
 
-    QAction *actClearRecentList = recentMenu->addAction("Clear");
+    QAction *actClearRecentList = recentMenu->addAction("クリア");
     connect(actClearRecentList, &QAction::triggered, this, &MainWindow::onClearRecentFiles);
 
     if (recentFileList.empty())
@@ -1566,9 +1566,9 @@ void MainWindow::onSaveState()
         // TODO: specific 'last directory' for savestate files?
         emuThread->emuPause();
         filename = QFileDialog::getSaveFileName(this,
-                                                         "Save state",
+                                                         "ステートセーブ",
                                                          globalCfg.GetQString("LastROMFolder"),
-                                                         "melonDS savestates (*.mln);;Any file (*.*)");
+                                                         "melonDS ステートセーブ (*.mln);;すべてのファイル (*.*)");
         emuThread->emuUnpause();
         if (filename.isEmpty())
             return;
@@ -1601,9 +1601,9 @@ void MainWindow::onLoadState()
         // TODO: specific 'last directory' for savestate files?
         emuThread->emuPause();
         filename = QFileDialog::getOpenFileName(this,
-                                                         "Load state",
+                                                         "ステートロード",
                                                          globalCfg.GetQString("LastROMFolder"),
-                                                         "melonDS savestates (*.ml*);;Any file (*.*)");
+                                                         "melonDS ステートセーブ (*.ml*);;すべてのファイル (*.*)");
         emuThread->emuUnpause();
         if (filename.isEmpty())
             return;
@@ -1640,16 +1640,16 @@ void MainWindow::onUndoStateLoad()
 void MainWindow::onImportSavefile()
 {
     QString path = QFileDialog::getOpenFileName(this,
-                                            "Select savefile",
+                                            "セーブファイルを選択",
                                             globalCfg.GetQString("LastROMFolder"),
-                                            "Savefiles (*.sav *.bin *.dsv);;Any file (*.*)");
+                                            "セーブファイル (*.sav *.bin *.dsv);;すべてのファイル (*.*)");
 
     if (path.isEmpty())
         return;
 
     if (!Platform::FileExists(path.toStdString()))
     {
-        QMessageBox::critical(this, "melonDS", "Could not open the given savefile.");
+        QMessageBox::critical(this, "melonDS", "指定されたセーブファイルを開けません。");
         return;
     }
 
@@ -1657,7 +1657,7 @@ void MainWindow::onImportSavefile()
     {
         if (QMessageBox::warning(this,
                         "melonDS",
-                        "The emulation will be reset and the current savefile overwritten.",
+                        "エミュレーションがリセットされ、現在のセーブファイルが上書きされます。",
                         QMessageBox::Ok, QMessageBox::Cancel) != QMessageBox::Ok)
         {
             return;
@@ -1666,7 +1666,7 @@ void MainWindow::onImportSavefile()
 
     if (!emuThread->importSavefile(path))
     {
-        QMessageBox::critical(this, "melonDS", "Could not import the given savefile.");
+        QMessageBox::critical(this, "melonDS", "指定されたセーブファイルをインポートできません。");
         return;
     }
 }
@@ -1824,10 +1824,10 @@ bool MainWindow::lanWarning(bool host)
     if (numEmuInstances() < 2)
         return true;
 
-    QString verb = host ? "host" : "join";
-    QString msg = "Multiple emulator instances are currently open.\n"
-            "If you "+verb+" a LAN game now, all secondary instances will be closed.\n\n"
-            "Do you wish to continue?";
+    QString verb = host ? "ホスト" : "参加";
+    QString msg = "複数のエミュレーターインスタンスが開いています。\n"
+            "今LANゲームを"+verb+"すると、すべてのサブインスタンスが閉じられます。\n\n"
+            "続行しますか？";
 
     auto res = QMessageBox::warning(this, "melonDS", msg, QMessageBox::Yes|QMessageBox::No, QMessageBox::No);
     if (res == QMessageBox::No)
@@ -1865,7 +1865,7 @@ void MainWindow::onEmuSettingsDialogFinished(int res)
     if (EmuSettingsDialog::needsReset)
         onReset();
 
-    actCurrentGBACart->setText("GBA slot: " + emuInstance->gbaCartLabel());
+    actCurrentGBACart->setText("GBAスロット: " + emuInstance->gbaCartLabel());
 
     if (!emuThread->emuIsActive())
         actTitleManager->setEnabled(!globalCfg.GetString("DSi.NANDPath").empty());

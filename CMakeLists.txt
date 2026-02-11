@@ -17,7 +17,7 @@ if (USE_VCPKG)
 endif()
 
 project(melonDS
-    VERSION 1.1
+    VERSION 8.1.0
     DESCRIPTION "DS emulator, sorta"
     HOMEPAGE_URL "https://melonds.kuribo64.net"
     LANGUAGES C CXX)
@@ -58,9 +58,19 @@ function(detect_architecture symbol arch)
 endfunction()
 
 detect_architecture("__x86_64__" x86_64)
+detect_architecture("_M_X64" x86_64)
 detect_architecture("__i386__" x86)
+detect_architecture("_M_IX86" x86)
 detect_architecture("__arm__" ARM)
 detect_architecture("__aarch64__" ARM64)
+detect_architecture("_M_ARM64" ARM64)
+
+# Force x86_64 on MSVC when auto-detection fails
+if (NOT DEFINED ARCHITECTURE AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(ARCHITECTURE "x86_64")
+    set(ARCHITECTURE_x86_64 1)
+    add_definitions(-DARCHITECTURE_x86_64=1)
+endif()
 
 cmake_dependent_option(ENABLE_JIT "Enable JIT recompiler" ON
     "ARCHITECTURE STREQUAL x86_64 OR ARCHITECTURE STREQUAL ARM64;NOT ARCHITECTURE STREQUAL x86_64 OR NOT APPLE" OFF)

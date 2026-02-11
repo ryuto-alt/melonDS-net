@@ -17,34 +17,34 @@
    </sizepolicy>
   </property>
   <property name="windowTitle">
-   <string>Import title - melonDS</string>
+   <string>タイトルインポート - melonDS</string>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="3" column="2">
     <widget class="QPushButton" name="btnTmdBrowse">
      <property name="text">
-      <string>Browse...</string>
+      <string>参照...</string>
      </property>
     </widget>
    </item>
    <item row="4" column="0" colspan="3">
     <widget class="QRadioButton" name="rbTmdFromNUS">
      <property name="text">
-      <string>Download from NUS</string>
+      <string>NUSからダウンロード</string>
      </property>
     </widget>
    </item>
    <item row="2" column="0" colspan="3">
     <widget class="QLabel" name="label_2">
      <property name="text">
-      <string>Metadata (TMD):</string>
+      <string>メタデータ (TMD):</string>
      </property>
     </widget>
    </item>
    <item row="3" column="0">
     <widget class="QRadioButton" name="rbTmdFromFile">
      <property name="text">
-      <string>From file:</string>
+      <string>ファイルから:</string>
      </property>
     </widget>
    </item>
@@ -71,7 +71,7 @@
    <item row="0" column="0">
     <widget class="QLabel" name="label">
      <property name="text">
-      <string>Executable:</string>
+      <string>実行ファイル:</string>
      </property>
     </widget>
    </item>
@@ -88,7 +88,7 @@
    <item row="0" column="2">
     <widget class="QPushButton" name="btnAppBrowse">
      <property name="text">
-      <string>Browse...</string>
+      <string>参照...</string>
      </property>
     </widget>
    </item>
@@ -98,7 +98,7 @@
       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Makes the title executable and TMD read-only. Prevents DSi system utilities from deleting them.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
      <property name="text">
-      <string>Make title files read-only</string>
+      <string>タイトルファイルを読み取り専用にする</string>
      </property>
     </widget>
    </item>

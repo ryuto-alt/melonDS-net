@@ -17,7 +17,7 @@
    </sizepolicy>
   </property>
   <property name="windowTitle">
-   <string>Interface settings - melonDS</string>
+   <string>インターフェース設定 - melonDS</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0">
    <property name="sizeConstraint">
@@ -26,7 +26,7 @@
    <item>
     <widget class="QGroupBox" name="groupBox">
      <property name="title">
-      <string>User interface</string>
+      <string>ユーザーインターフェース</string>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_2">
       <item>
@@ -34,7 +34,7 @@
         <item>
          <widget class="QLabel" name="label_4">
           <property name="text">
-           <string>Theme</string>
+           <string>テーマ</string>
           </property>
           <property name="buddy">
            <cstring>cbxUITheme</cstring>
@@ -49,7 +49,7 @@
       <item>
        <widget class="QCheckBox" name="cbMouseHide">
         <property name="text">
-         <string>Hide mouse after inactivity</string>
+         <string>非操作時にマウスを非表示</string>
         </property>
        </widget>
       </item>
@@ -61,7 +61,7 @@
         <item>
          <widget class="QLabel" name="label">
           <property name="text">
-           <string>After</string>
+           <string>待機時間</string>
           </property>
           <property name="buddy">
            <cstring>spinMouseHideSeconds</cstring>
@@ -74,7 +74,7 @@
         <item>
          <widget class="QLabel" name="label_2">
           <property name="text">
-           <string>seconds</string>
+           <string>秒</string>
           </property>
           <property name="buddy">
            <cstring>spinMouseHideSeconds</cstring>
@@ -86,14 +86,14 @@
       <item>
        <widget class="QCheckBox" name="cbPauseLostFocus">
         <property name="text">
-         <string>Pause emulation when window is not in focus</string>
+         <string>ウィンドウが非アクティブ時にエミュレーションを一時停止</string>
         </property>
        </widget>
       </item>
       <item>
        <widget class="QCheckBox" name="cbMuteFastForward">
         <property name="text">
-         <string>Mute audio while fast forwarding</string>
+         <string>早送り中に音声をミュート</string>
         </property>
        </widget>
       </item>
@@ -103,7 +103,7 @@
    <item>
     <widget class="QGroupBox" name="groupBox_2">
      <property name="title">
-      <string>Framerate </string>
+      <string>フレームレート</string>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_5">
       <item>
@@ -117,14 +117,14 @@
         <item row="0" column="0">
          <widget class="QLabel" name="label_5">
           <property name="text">
-           <string>Target FPS</string>
+           <string>目標FPS</string>
           </property>
          </widget>
         </item>
         <item row="1" column="0">
          <widget class="QLabel" name="label_3">
           <property name="text">
-           <string>Fast-Forward</string>
+           <string>早送り</string>
           </property>
           <property name="buddy">
            <cstring>spinFFW</cstring>
@@ -224,7 +224,7 @@
         <item row="2" column="0">
          <widget class="QLabel" name="label_6">
           <property name="text">
-           <string>Slow-Mo</string>
+           <string>スローモーション</string>
           </property>
          </widget>
         </item>
@@ -242,7 +242,7 @@
              </size>
             </property>
             <property name="text">
-             <string>Accurate</string>
+             <string>正確</string>
             </property>
            </widget>
           </item>
@@ -255,7 +255,7 @@
              </size>
             </property>
             <property name="text">
-             <string>Clean</string>
+             <string>きれい</string>
             </property>
            </widget>
           </item>
