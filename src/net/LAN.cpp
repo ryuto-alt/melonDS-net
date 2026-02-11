@@ -827,6 +827,7 @@ void LAN::ProcessLAN(int type)
 
         if ((packettime > time_last) || (packettime < (time_last - 500)))
         {
+            Platform::Log(Platform::LogLevel::Debug, "LAN: discard stale pkt type=%d age=%d\n", header->Type, (int)(time_last - packettime));
             RXQueue.pop();
             enet_packet_destroy(enetpacket);
         }
@@ -934,6 +935,7 @@ void LAN::Begin(int inst)
 {
     if (!Host) return;
 
+    Platform::Log(Platform::LogLevel::Info, "LAN: Begin (myID=%d bitmask=%04X)\n", MyPlayer.ID, ConnectedBitmask);
     ConnectedBitmask |= (1 << MyPlayer.ID);
     LastHostID = -1;
     LastHostPeer = nullptr;
@@ -947,6 +949,7 @@ void LAN::End(int inst)
 {
     if (!Host) return;
 
+    Platform::Log(Platform::LogLevel::Info, "LAN: End (myID=%d bitmask=%04X)\n", MyPlayer.ID, ConnectedBitmask);
     ConnectedBitmask &= ~(1 << MyPlayer.ID);
 
     u8 cmd = Cmd_PlayerDisconnect;
@@ -959,11 +962,7 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
 {
     if (!Host) return 0;
 
-    // Use unreliable unsequenced delivery for MP data:
-    // - Eliminates head-of-line blocking that causes game freezes
-    // - DS WiFi protocol has its own retry mechanism for lost packets
-    // - Minimizes latency for real-time multiplayer communication
-    u32 flags = ENET_PACKET_FLAG_UNSEQUENCED;
+    u32 flags = ENET_PACKET_FLAG_RELIABLE;
 
     ENetPacket* enetpacket = enet_packet_create(nullptr, sizeof(MPPacketHeader)+len, flags);
 
@@ -1018,39 +1017,41 @@ int LAN::RecvPacketGeneric(u8* packet, bool block, u64* timestamp)
 
 int LAN::SendPacket(int inst, u8* packet, int len, u64 timestamp)
 {
+    Platform::Log(Platform::LogLevel::Debug, "LAN: TX pkt len=%d\n", len);
     int ret = SendPacketGeneric(0, packet, len, timestamp);
-    // Flush immediately: regular WiFi frames (beacons, auth, association)
-    // must be dispatched without delay for DS WiFi protocol to work
     if (Host) enet_host_flush(Host);
     return ret;
 }
 
 int LAN::RecvPacket(int inst, u8* packet, u64* timestamp)
 {
-    // Flush pending outgoing packets before checking for incoming
     if (Host) enet_host_flush(Host);
-    return RecvPacketGeneric(packet, false, timestamp);
+    int ret = RecvPacketGeneric(packet, false, timestamp);
+    if (ret > 0)
+        Platform::Log(Platform::LogLevel::Debug, "LAN: RX pkt len=%d\n", ret);
+    return ret;
 }
 
 
 int LAN::SendCmd(int inst, u8* packet, int len, u64 timestamp)
 {
+    Platform::Log(Platform::LogLevel::Debug, "LAN: TX CMD len=%d\n", len);
     int ret = SendPacketGeneric(1, packet, len, timestamp);
-    // flush immediately after host command so clients receive it ASAP
     if (Host) enet_host_flush(Host);
     return ret;
 }
 
 int LAN::SendReply(int inst, u8* packet, int len, u64 timestamp, u16 aid)
 {
+    Platform::Log(Platform::LogLevel::Debug, "LAN: TX reply aid=%d len=%d\n", aid, len);
     int ret = SendPacketGeneric(2 | (aid<<16), packet, len, timestamp);
-    // flush immediately so host receives reply without delay
     if (Host) enet_host_flush(Host);
     return ret;
 }
 
 int LAN::SendAck(int inst, u8* packet, int len, u64 timestamp)
 {
+    Platform::Log(Platform::LogLevel::Debug, "LAN: TX ACK len=%d\n", len);
     int ret = SendPacketGeneric(3, packet, len, timestamp);
     if (Host) enet_host_flush(Host);
     return ret;
@@ -1060,16 +1061,21 @@ int LAN::RecvHostPacket(int inst, u8* packet, u64* timestamp)
 {
     if (LastHostID != -1)
     {
-        // check if the host is still connected
-
         if (!(ConnectedBitmask & (1<<LastHostID)))
+        {
+            Platform::Log(Platform::LogLevel::Debug, "LAN: RecvHost -> host gone (bitmask=%04X lasthost=%d)\n", ConnectedBitmask, LastHostID);
             return -1;
+        }
     }
 
-    // flush pending outgoing packets before blocking on receive
     if (Host) enet_host_flush(Host);
 
-    return RecvPacketGeneric(packet, true, timestamp);
+    int ret = RecvPacketGeneric(packet, true, timestamp);
+    if (ret > 0)
+        Platform::Log(Platform::LogLevel::Debug, "LAN: RX host CMD len=%d\n", ret);
+    else if (ret == 0)
+        Platform::Log(Platform::LogLevel::Debug, "LAN: RecvHost timeout (bitmask=%04X)\n", ConnectedBitmask);
+    return ret;
 }
 
 u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
@@ -1080,7 +1086,10 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
     u16 myinstmask = 1 << MyPlayer.ID;
 
     if ((myinstmask & ConnectedBitmask) == ConnectedBitmask)
+    {
+        Platform::Log(Platform::LogLevel::Debug, "LAN: RecvReplies -> no peers (bitmask=%04X myid=%d)\n", ConnectedBitmask, MyPlayer.ID);
         return 0;
+    }
 
     // flush pending outgoing packets first for faster round-trip
     enet_host_flush(Host);
