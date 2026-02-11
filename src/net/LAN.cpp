@@ -99,7 +99,7 @@ LAN::LAN() noexcept : Inited(false)
 
     ConnectedBitmask = 0;
 
-    MPRecvTimeout = 50;
+    MPRecvTimeout = 25;
     LastHostID = -1;
     LastHostPeer = nullptr;
 
@@ -827,7 +827,6 @@ void LAN::ProcessLAN(int type)
 
         if ((packettime > time_last) || (packettime < (time_last - 500)))
         {
-            Platform::Log(Platform::LogLevel::Debug, "LAN: discard stale pkt type=%d age=%d\n", header->Type, (int)(time_last - packettime));
             RXQueue.pop();
             enet_packet_destroy(enetpacket);
         }
@@ -956,7 +955,11 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
 {
     if (!Host) return 0;
 
-    u32 flags = ENET_PACKET_FLAG_RELIABLE;
+    // unreliable sequenced: eliminates ENet ACK overhead and head-of-line
+    // blocking.  The DS WiFi protocol has its own retry mechanism, so
+    // reliable delivery at the transport layer is redundant and adds
+    // significant latency on every packet.
+    u32 flags = 0;
 
     ENetPacket* enetpacket = enet_packet_create(nullptr, sizeof(MPPacketHeader)+len, flags);
 
@@ -1011,7 +1014,6 @@ int LAN::RecvPacketGeneric(u8* packet, bool block, u64* timestamp)
 
 int LAN::SendPacket(int inst, u8* packet, int len, u64 timestamp)
 {
-    Platform::Log(Platform::LogLevel::Debug, "LAN: TX pkt len=%d\n", len);
     int ret = SendPacketGeneric(0, packet, len, timestamp);
     if (Host) enet_host_flush(Host);
     return ret;
@@ -1021,15 +1023,12 @@ int LAN::RecvPacket(int inst, u8* packet, u64* timestamp)
 {
     if (Host) enet_host_flush(Host);
     int ret = RecvPacketGeneric(packet, false, timestamp);
-    if (ret > 0)
-        Platform::Log(Platform::LogLevel::Debug, "LAN: RX pkt len=%d\n", ret);
     return ret;
 }
 
 
 int LAN::SendCmd(int inst, u8* packet, int len, u64 timestamp)
 {
-    Platform::Log(Platform::LogLevel::Debug, "LAN: TX CMD len=%d\n", len);
     int ret = SendPacketGeneric(1, packet, len, timestamp);
     if (Host) enet_host_flush(Host);
     return ret;
@@ -1037,7 +1036,6 @@ int LAN::SendCmd(int inst, u8* packet, int len, u64 timestamp)
 
 int LAN::SendReply(int inst, u8* packet, int len, u64 timestamp, u16 aid)
 {
-    Platform::Log(Platform::LogLevel::Debug, "LAN: TX reply aid=%d len=%d\n", aid, len);
     int ret = SendPacketGeneric(2 | (aid<<16), packet, len, timestamp);
     if (Host) enet_host_flush(Host);
     return ret;
@@ -1045,7 +1043,6 @@ int LAN::SendReply(int inst, u8* packet, int len, u64 timestamp, u16 aid)
 
 int LAN::SendAck(int inst, u8* packet, int len, u64 timestamp)
 {
-    Platform::Log(Platform::LogLevel::Debug, "LAN: TX ACK len=%d\n", len);
     int ret = SendPacketGeneric(3, packet, len, timestamp);
     if (Host) enet_host_flush(Host);
     return ret;
@@ -1056,10 +1053,6 @@ int LAN::RecvHostPacket(int inst, u8* packet, u64* timestamp)
     if (Host) enet_host_flush(Host);
 
     int ret = RecvPacketGeneric(packet, true, timestamp);
-    if (ret > 0)
-        Platform::Log(Platform::LogLevel::Debug, "LAN: RX host CMD len=%d\n", ret);
-    else if (ret == 0)
-        Platform::Log(Platform::LogLevel::Debug, "LAN: RecvHost timeout (bitmask=%04X lasthost=%d)\n", ConnectedBitmask, LastHostID);
     return ret;
 }
 
@@ -1071,10 +1064,7 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
     u16 myinstmask = 1 << MyPlayer.ID;
 
     if ((myinstmask & ConnectedBitmask) == ConnectedBitmask)
-    {
-        Platform::Log(Platform::LogLevel::Debug, "LAN: RecvReplies -> no peers (bitmask=%04X myid=%d)\n", ConnectedBitmask, MyPlayer.ID);
         return 0;
-    }
 
     // flush pending outgoing packets first for faster round-trip
     enet_host_flush(Host);
@@ -1109,7 +1099,6 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
                     memcpy(&packets[(aid-1)*1024], &enetpacket->data[sizeof(MPPacketHeader)], len);
 
                     ret |= (1<<aid);
-                    Platform::Log(Platform::LogLevel::Debug, "LAN: RX reply aid=%d len=%d sender=%d\n", aid, len, header->SenderID);
                 }
 
                 myinstmask |= (1<<header->SenderID);
@@ -1123,7 +1112,6 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
             }
             else
             {
-                Platform::Log(Platform::LogLevel::Debug, "LAN: RecvReplies discard pkt type=%04X\n", header->Type);
             }
 
             enet_packet_destroy(enetpacket);
@@ -1133,10 +1121,7 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         u32 now = (u32)Platform::GetMSCount();
         int remaining = MPRecvTimeout - (int)(now - timeout_start);
         if (remaining <= 0)
-        {
-            Platform::Log(Platform::LogLevel::Debug, "LAN: RecvReplies timeout ret=%04X bitmask=%04X\n", ret, ConnectedBitmask);
             return ret;
-        }
 
         // poll for more packets with short intervals for responsiveness
         int poll_timeout = (remaining > 1) ? 1 : remaining;
