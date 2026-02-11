@@ -863,7 +863,7 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
         return args;
     };
 
-    if (!netplaySession->CreateInstances(argsBuilder))
+    if (!netplaySession->CreateInstances(argsBuilder, this))
     {
         netplaySession.reset();
         return false;

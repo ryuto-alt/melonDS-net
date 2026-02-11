@@ -123,7 +123,7 @@ void NetplaySession::DeInit()
     Log(LogLevel::Info, "Netplay: session deinitialized\n");
 }
 
-bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder)
+bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder, void* origUserdata)
 {
     for (int i = 0; i < NumInstances; i++)
     {
@@ -131,8 +131,10 @@ bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder)
 
         // Each instance gets a NetplayInstanceData as userdata
         // so that Platform::MP_* callbacks can route to the correct LocalMP instance
+        // OrigUserdata points to EmuInstance* so non-MP Platform callbacks still work
         InstData[i].InstID = i;
         InstData[i].Session = this;
+        InstData[i].OrigUserdata = origUserdata;
 
         Instances[i] = new NDS(std::move(args), &InstData[i]);
 

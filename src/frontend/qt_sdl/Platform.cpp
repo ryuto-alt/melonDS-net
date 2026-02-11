@@ -57,9 +57,20 @@ extern melonDS::Net net;
 namespace melonDS::Platform
 {
 
+// Helper: safely get EmuInstance* from userdata.
+// In netplay mode, userdata is NetplayInstanceData* (with magic tag and OrigUserdata).
+// In normal mode, userdata is EmuInstance* directly.
+static EmuInstance* GetEmuInstance(void* userdata)
+{
+    NetplayInstanceData* npd = (NetplayInstanceData*)userdata;
+    if (npd->Magic == NetplayInstanceData::kMagic)
+        return (EmuInstance*)npd->OrigUserdata;
+    return (EmuInstance*)userdata;
+}
+
 void SignalStop(StopReason reason, void* userdata)
 {
-    EmuInstance* inst = (EmuInstance*)userdata;
+    EmuInstance* inst = GetEmuInstance(userdata);
     inst->emuStop(reason);
 }
 
@@ -430,21 +441,21 @@ u64 GetUSCount()
 
 void WriteNDSSave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen, void* userdata)
 {
-    EmuInstance* inst = (EmuInstance*)userdata;
+    EmuInstance* inst = GetEmuInstance(userdata);
     if (inst->ndsSave)
         inst->ndsSave->RequestFlush(savedata, savelen, writeoffset, writelen);
 }
 
 void WriteGBASave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen, void* userdata)
 {
-    EmuInstance* inst = (EmuInstance*)userdata;
+    EmuInstance* inst = GetEmuInstance(userdata);
     if (inst->gbaSave)
         inst->gbaSave->RequestFlush(savedata, savelen, writeoffset, writelen);
 }
 
 void WriteFirmware(const Firmware& firmware, u32 writeoffset, u32 writelen, void* userdata)
 {
-    EmuInstance* inst = (EmuInstance*)userdata;
+    EmuInstance* inst = GetEmuInstance(userdata);
     printf("saving firmware for instance %d\n", inst->getInstanceID());
     if (!inst->firmwareSave)
         return;
@@ -477,7 +488,7 @@ void WriteFirmware(const Firmware& firmware, u32 writeoffset, u32 writelen, void
 
 void WriteDateTime(int year, int month, int day, int hour, int minute, int second, void* userdata)
 {
-    EmuInstance* inst = (EmuInstance*)userdata;
+    EmuInstance* inst = GetEmuInstance(userdata);
     QDateTime hosttime = QDateTime::currentDateTime();
     QDateTime time = QDateTime(QDate(year, month, day), QTime(hour, minute, second));
     auto& cfg = inst->getLocalConfig();
@@ -496,7 +507,7 @@ static int GetMPInstID(void* userdata)
     NetplayInstanceData* npd = (NetplayInstanceData*)userdata;
     if (npd->Magic == NetplayInstanceData::kMagic)
         return npd->InstID;
-    return ((EmuInstance*)userdata)->getInstanceID();
+    return GetEmuInstance(userdata)->getInstanceID();
 }
 
 static MPInterface& GetMPInterface(void* userdata)
@@ -564,26 +575,26 @@ u16 MP_RecvReplies(u8* data, u64 timestamp, u16 aidmask, void* userdata)
 
 int Net_SendPacket(u8* data, int len, void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
+    int inst = GetEmuInstance(userdata)->getInstanceID();
     net.SendPacket(data, len, inst);
     return 0;
 }
 
 int Net_RecvPacket(u8* data, void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
+    int inst = GetEmuInstance(userdata)->getInstanceID();
     return net.RecvPacket(data, inst);
 }
 
 
 void Mic_Start(void* userdata)
 {
-    return ((EmuInstance*)userdata)->micStart();
+    return GetEmuInstance(userdata)->micStart();
 }
 
 void Mic_Stop(void* userdata)
 {
-    return ((EmuInstance*)userdata)->micStop();
+    return GetEmuInstance(userdata)->micStop();
 }
 
 int Mic_ReadInput(s16* data, int maxlength, void* userdata)
@@ -594,7 +605,7 @@ int Mic_ReadInput(s16* data, int maxlength, void* userdata)
         memset(data, 0, maxlength * sizeof(s16));
         return maxlength;
     }
-    return ((EmuInstance*)userdata)->micReadInput(data, maxlength);
+    return GetEmuInstance(userdata)->micReadInput(data, maxlength);
 }
 
 
@@ -622,22 +633,22 @@ static const int hotkeyMap[] = {
 
 bool Addon_KeyDown(KeyType type, void* userdata)
 {
-    return ((EmuInstance*)userdata)->inputHotkeyDown(hotkeyMap[type]);
+    return GetEmuInstance(userdata)->inputHotkeyDown(hotkeyMap[type]);
 }
 
 void Addon_RumbleStart(u32 len, void* userdata)
 {
-    ((EmuInstance*)userdata)->inputRumbleStart(len);
+    GetEmuInstance(userdata)->inputRumbleStart(len);
 }
 
 void Addon_RumbleStop(void* userdata)
 {
-    ((EmuInstance*)userdata)->inputRumbleStop();
+    GetEmuInstance(userdata)->inputRumbleStop();
 }
 
 float Addon_MotionQuery(MotionQueryType type, void* userdata)
 {
-    return ((EmuInstance*)userdata)->inputMotionQuery(type);
+    return GetEmuInstance(userdata)->inputMotionQuery(type);
 }
 
 DynamicLibrary* DynamicLibrary_Load(const char* lib)

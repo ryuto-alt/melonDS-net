@@ -75,6 +75,7 @@ struct NetplayInstanceData
     u32 Magic = kMagic;
     int InstID;
     void* Session; // NetplaySession*
+    void* OrigUserdata; // EmuInstance* for non-MP Platform callbacks
 };
 
 class NetplaySession
@@ -94,7 +95,7 @@ public:
     // ROM must be loaded before starting.
     // Creates NDS instances internally using the provided args builder.
     using NDSArgsBuilder = std::function<NDSArgs()>;
-    bool CreateInstances(const NDSArgsBuilder& argsBuilder);
+    bool CreateInstances(const NDSArgsBuilder& argsBuilder, void* origUserdata = nullptr);
 
     // Load ROM into all instances
     bool LoadROM(std::unique_ptr<NDSCart::CartCommon> cart);
