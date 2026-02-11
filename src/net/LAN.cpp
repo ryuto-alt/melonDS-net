@@ -849,11 +849,12 @@ void LAN::ProcessLAN(int type)
         }
     }
 
-    // type 2 (MP host frame wait) uses non-blocking mode:
-    // the WiFi emulation layer retries on its own schedule,
-    // so we just check for already-arrived packets without blocking.
-    // This prevents each 8us emulated tick from blocking 50ms on the network.
-    int timeout = 0;
+    // type 2 (MP host frame wait): use a moderate blocking timeout.
+    // Too long (50ms) freezes the game; too short (0ms) lets emulated time
+    // advance while waiting, causing DS WiFi protocol timeouts.
+    // 15ms catches most one-way packets in one try while keeping
+    // emulated time consumption low (~128us per retry via NextSync).
+    int timeout = (type == 2) ? 15 : 0;
     time_last = (u32)Platform::GetMSCount();
 
     ENetEvent event;
