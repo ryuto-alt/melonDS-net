@@ -1018,11 +1018,17 @@ int LAN::RecvPacketGeneric(u8* packet, bool block, u64* timestamp)
 
 int LAN::SendPacket(int inst, u8* packet, int len, u64 timestamp)
 {
-    return SendPacketGeneric(0, packet, len, timestamp);
+    int ret = SendPacketGeneric(0, packet, len, timestamp);
+    // Flush immediately: regular WiFi frames (beacons, auth, association)
+    // must be dispatched without delay for DS WiFi protocol to work
+    if (Host) enet_host_flush(Host);
+    return ret;
 }
 
 int LAN::RecvPacket(int inst, u8* packet, u64* timestamp)
 {
+    // Flush pending outgoing packets before checking for incoming
+    if (Host) enet_host_flush(Host);
     return RecvPacketGeneric(packet, false, timestamp);
 }
 
