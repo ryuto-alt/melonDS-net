@@ -1766,11 +1766,11 @@ void Wifi::USTimer(u32 param)
         {
             if (!CheckRX(2))
             {
-                // Don't retry every 8us tick -- advance NextSync to avoid
-                // tight polling that blocks the emulation.
-                // 128us gives ~7800 retries/sec which is responsive enough
-                // to pick up packets promptly when they arrive.
-                NextSync = USTimestamp + 128;
+                // Advance NextSync so the emulation keeps running at full
+                // speed.  The background network thread receives packets
+                // asynchronously, so we just need periodic queue checks.
+                // 1024us (~1ms) balances responsiveness with low overhead.
+                NextSync = USTimestamp + 1024;
             }
         }
     }

@@ -99,7 +99,7 @@ LAN::LAN() noexcept : Inited(false)
 
     ConnectedBitmask.store(0);
 
-    MPRecvTimeout = 25;
+    MPRecvTimeout = 10;
     LastHostID = -1;
     LastHostPeer = nullptr;
 
@@ -924,16 +924,10 @@ void LAN::ProcessLAN(int type)
         }
     }
 
-    if (found) return;
-
-    // For type 2 (MP host-frame wait): the background thread is
-    // continuously receiving, so we just need a brief real-time sleep to
-    // throttle emulated-time advancement (prevents DS WiFi protocol
-    // timeouts) while giving the network thread time to deliver packets.
-    if (type == 2)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
+    // No blocking -- the background network thread continuously fills
+    // RXQueue.  The caller (Wifi::USTimer) advances NextSync and retries
+    // on the next emulated-time tick, so the emulation keeps running at
+    // full speed while packets are received asynchronously.
 }
 
 void LAN::Process()
@@ -1162,8 +1156,8 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         if (remaining <= 0)
             return ret;
 
-        // brief sleep -- network thread keeps filling the queue
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // yield to let network thread fill the queue
+        std::this_thread::yield();
     }
 }
 
