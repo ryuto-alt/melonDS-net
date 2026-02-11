@@ -23,6 +23,9 @@
 #include <vector>
 #include <map>
 #include <queue>
+#include <thread>
+#include <mutex>
+#include <atomic>
 
 #include <enet/enet.h>
 
@@ -131,17 +134,28 @@ private:
     Player MyPlayer;
     u32 HostAddress;
 
-    u16 ConnectedBitmask;
+    std::atomic<u16> ConnectedBitmask;
 
     int MPRecvTimeout;
     int LastHostID;
     ENetPeer* LastHostPeer;
     std::queue<ENetPacket*> RXQueue;
+    std::mutex RXQueueMutex;
 
     int GamePort;
     bool UPnPActive;
 
     u32 FrameCount;
+
+    // Background network I/O thread -- receives packets asynchronously
+    // so the emulation thread never blocks on enet_host_service.
+    std::thread NetThread;
+    std::atomic<bool> NetThreadRunning{false};
+    std::mutex ENetMutex;   // protects all ENet Host operations
+
+    void NetworkThreadFunc();
+    void StartNetThread();
+    void StopNetThread();
 
     void ProcessDiscovery();
 

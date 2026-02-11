@@ -97,7 +97,7 @@ LAN::LAN() noexcept : Inited(false)
     NumPlayers = 0;
     MaxPlayers = 0;
 
-    ConnectedBitmask = 0;
+    ConnectedBitmask.store(0);
 
     MPRecvTimeout = 25;
     LastHostID = -1;
@@ -263,6 +263,7 @@ bool LAN::StartHost(const char* playername, int numplayers, int port)
     Active = true;
     IsHost = true;
 
+    StartNetThread();
     StartDiscovery();
     return true;
 }
@@ -376,12 +377,17 @@ bool LAN::StartClient(const char* playername, const char* host, int port)
 
     Active = true;
     IsHost = false;
+
+    StartNetThread();
     return true;
 }
 
 void LAN::EndSession()
 {
     if (!Active) return;
+
+    StopNetThread();
+
     if (IsHost) EndDiscovery();
 
     if (UPnPActive)
@@ -586,7 +592,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
             Player* player = (Player*)event.peer->data;
             if (!player) break;
 
-            ConnectedBitmask &= ~(1 << player->ID);
+            ConnectedBitmask.fetch_and(~(1 << player->ID));
 
             int id = player->ID;
             RemotePeers[id] = nullptr;
@@ -649,7 +655,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
                     Player* player = (Player*)event.peer->data;
                     if (!player) break;
 
-                    ConnectedBitmask |= (1 << player->ID);
+                    ConnectedBitmask.fetch_or(1 << player->ID);
                 }
                 break;
 
@@ -659,7 +665,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
                     Player* player = (Player*)event.peer->data;
                     if (!player) break;
 
-                    ConnectedBitmask &= ~(1 << player->ID);
+                    ConnectedBitmask.fetch_and(~(1 << player->ID));
                 }
                 break;
             }
@@ -710,7 +716,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
             Player* player = (Player*)event.peer->data;
             if (!player) break;
 
-            ConnectedBitmask &= ~(1 << player->ID);
+            ConnectedBitmask.fetch_and(~(1 << player->ID));
 
             int id = player->ID;
             RemotePeers[id] = nullptr;
@@ -775,7 +781,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
                     Player* player = (Player*)event.peer->data;
                     if (!player) break;
 
-                    ConnectedBitmask |= (1 << player->ID);
+                    ConnectedBitmask.fetch_or(1 << player->ID);
                 }
                 break;
 
@@ -785,7 +791,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
                     Player* player = (Player*)event.peer->data;
                     if (!player) break;
 
-                    ConnectedBitmask &= ~(1 << player->ID);
+                    ConnectedBitmask.fetch_and(~(1 << player->ID));
                 }
                 break;
             }
@@ -806,6 +812,79 @@ void LAN::ProcessEvent(ENetEvent& event)
         ProcessClientEvent(event);
 }
 
+// ---------------------------------------------------------------------------
+// Background network I/O thread
+// ---------------------------------------------------------------------------
+// Continuously polls ENet for incoming packets so the emulation thread never
+// blocks on enet_host_service.  All ENet calls are serialised via ENetMutex.
+
+void LAN::StartNetThread()
+{
+    if (NetThreadRunning.load()) return;
+    NetThreadRunning.store(true);
+    NetThread = std::thread(&LAN::NetworkThreadFunc, this);
+}
+
+void LAN::StopNetThread()
+{
+    NetThreadRunning.store(false);
+    if (NetThread.joinable())
+        NetThread.join();
+}
+
+void LAN::NetworkThreadFunc()
+{
+    while (NetThreadRunning.load(std::memory_order_relaxed))
+    {
+        {
+            std::lock_guard<std::mutex> lock(ENetMutex);
+            if (!Host) break;
+
+            ENetEvent event;
+            // Non-blocking poll -- the thread's own sleep provides pacing.
+            while (enet_host_service(Host, &event, 0) > 0)
+            {
+                if (event.type == ENET_EVENT_TYPE_RECEIVE
+                    && event.channelID == Chan_MP)
+                {
+                    MPPacketHeader* header =
+                        (MPPacketHeader*)&event.packet->data[0];
+
+                    bool good = true;
+                    if (event.packet->dataLength < sizeof(MPPacketHeader))
+                        good = false;
+                    else if (header->Magic != 0x4946494E)
+                        good = false;
+                    else if (header->SenderID == MyPlayer.ID)
+                        good = false;
+
+                    if (!good)
+                    {
+                        enet_packet_destroy(event.packet);
+                    }
+                    else
+                    {
+                        header->Magic = (u32)Platform::GetMSCount();
+                        event.packet->userData = event.peer;
+
+                        std::lock_guard<std::mutex> rxlock(RXQueueMutex);
+                        RXQueue.push(event.packet);
+                    }
+                }
+                else
+                {
+                    ProcessEvent(event);
+                }
+            }
+        }
+        // ~500us between polls: low-latency yet avoids busy-spinning.
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProcessLAN -- called from the emulation thread
+// ---------------------------------------------------------------------------
 // 0 = per-frame processing of events and eventual misc. frame
 // 1 = checking if a misc. frame has arrived
 // 2 = waiting for a MP frame
@@ -814,80 +893,46 @@ void LAN::ProcessLAN(int type)
     if (!Host) return;
 
     u32 time_last = (u32)Platform::GetMSCount();
+    bool found = false;
 
-    // see if we have queued packets already, get rid of the stale ones
-    // any incoming packet should be consumed by the core quickly, so if
-    // they've been sitting in the queue for more than one frame's time,
-    // we can assume they're stale
-    while (!RXQueue.empty())
     {
-        ENetPacket* enetpacket = RXQueue.front();
-        MPPacketHeader* header = (MPPacketHeader*)&enetpacket->data[0];
-        u32 packettime = header->Magic;
+        std::lock_guard<std::mutex> rxlock(RXQueueMutex);
 
-        if ((packettime > time_last) || (packettime < (time_last - 500)))
+        // discard stale packets
+        while (!RXQueue.empty())
         {
-            RXQueue.pop();
-            enet_packet_destroy(enetpacket);
-        }
-        else
-        {
-            // we got a packet, depending on what the caller wants we might be able to return now
-            if (type == 2) return;
-            if (type == 1)
+            ENetPacket* enetpacket = RXQueue.front();
+            MPPacketHeader* header = (MPPacketHeader*)&enetpacket->data[0];
+            u32 packettime = header->Magic;
+
+            if ((packettime > time_last) || (packettime < (time_last - 500)))
             {
-                // if looking for a misc. frame, we shouldn't be receiving a MP frame
-                if (header->Type == 0)
-                    return;
-
                 RXQueue.pop();
                 enet_packet_destroy(enetpacket);
             }
-
-            break;
+            else
+            {
+                if (type == 2) { found = true; break; }
+                if (type == 1)
+                {
+                    if (header->Type == 0) { found = true; break; }
+                    RXQueue.pop();
+                    enet_packet_destroy(enetpacket);
+                }
+                break;
+            }
         }
     }
 
-    // type 2 (MP host frame wait): use a moderate blocking timeout.
-    // Too long (50ms) freezes the game; too short (0ms) lets emulated time
-    // advance while waiting, causing DS WiFi protocol timeouts.
-    // 15ms catches most one-way packets in one try while keeping
-    // emulated time consumption low (~128us per retry via NextSync).
-    int timeout = (type == 2) ? 15 : 0;
-    time_last = (u32)Platform::GetMSCount();
+    if (found) return;
 
-    ENetEvent event;
-    while (enet_host_service(Host, &event, timeout) > 0)
+    // For type 2 (MP host-frame wait): the background thread is
+    // continuously receiving, so we just need a brief real-time sleep to
+    // throttle emulated-time advancement (prevents DS WiFi protocol
+    // timeouts) while giving the network thread time to deliver packets.
+    if (type == 2)
     {
-        if (event.type == ENET_EVENT_TYPE_RECEIVE && event.channelID == Chan_MP)
-        {
-            MPPacketHeader* header = (MPPacketHeader*)&event.packet->data[0];
-
-            bool good = true;
-            if (event.packet->dataLength < sizeof(MPPacketHeader))
-                good = false;
-            else if (header->Magic != 0x4946494E)
-                good = false;
-            else if (header->SenderID == MyPlayer.ID)
-                good = false;
-
-            if (!good)
-            {
-                enet_packet_destroy(event.packet);
-            }
-            else
-            {
-                // mark this packet with the time it was received
-                header->Magic = (u32)Platform::GetMSCount();
-
-                event.packet->userData = event.peer;
-                RXQueue.push(event.packet);
-            }
-        }
-        else
-        {
-            ProcessEvent(event);
-        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 }
 
@@ -898,8 +943,11 @@ void LAN::Process()
     ProcessDiscovery();
     ProcessLAN(0);
 
-    if (Host)
-        enet_host_flush(Host);
+    {
+        std::lock_guard<std::mutex> lock(ENetMutex);
+        if (Host)
+            enet_host_flush(Host);
+    }
 
     FrameCount++;
     if (FrameCount >= 60)
@@ -926,28 +974,34 @@ void LAN::Begin(int inst)
 {
     if (!Host) return;
 
-    Platform::Log(Platform::LogLevel::Info, "LAN: Begin (myID=%d bitmask=%04X)\n", MyPlayer.ID, ConnectedBitmask);
-    ConnectedBitmask |= (1 << MyPlayer.ID);
+    Platform::Log(Platform::LogLevel::Info, "LAN: Begin (myID=%d bitmask=%04X)\n", MyPlayer.ID, ConnectedBitmask.load());
+    ConnectedBitmask.fetch_or(1 << MyPlayer.ID);
     LastHostID = -1;
     LastHostPeer = nullptr;
 
-    u8 cmd = Cmd_PlayerConnect;
-    ENetPacket* pkt = enet_packet_create(&cmd, 1, ENET_PACKET_FLAG_RELIABLE);
-    enet_host_broadcast(Host, Chan_Cmd, pkt);
-    enet_host_flush(Host);
+    {
+        std::lock_guard<std::mutex> lock(ENetMutex);
+        u8 cmd = Cmd_PlayerConnect;
+        ENetPacket* pkt = enet_packet_create(&cmd, 1, ENET_PACKET_FLAG_RELIABLE);
+        enet_host_broadcast(Host, Chan_Cmd, pkt);
+        enet_host_flush(Host);
+    }
 }
 
 void LAN::End(int inst)
 {
     if (!Host) return;
 
-    Platform::Log(Platform::LogLevel::Info, "LAN: End (myID=%d bitmask=%04X)\n", MyPlayer.ID, ConnectedBitmask);
-    ConnectedBitmask &= ~(1 << MyPlayer.ID);
+    Platform::Log(Platform::LogLevel::Info, "LAN: End (myID=%d bitmask=%04X)\n", MyPlayer.ID, ConnectedBitmask.load());
+    ConnectedBitmask.fetch_and(~(1 << MyPlayer.ID));
 
-    u8 cmd = Cmd_PlayerDisconnect;
-    ENetPacket* pkt = enet_packet_create(&cmd, 1, ENET_PACKET_FLAG_RELIABLE);
-    enet_host_broadcast(Host, Chan_Cmd, pkt);
-    enet_host_flush(Host);
+    {
+        std::lock_guard<std::mutex> lock(ENetMutex);
+        u8 cmd = Cmd_PlayerDisconnect;
+        ENetPacket* pkt = enet_packet_create(&cmd, 1, ENET_PACKET_FLAG_RELIABLE);
+        enet_host_broadcast(Host, Chan_Cmd, pkt);
+        enet_host_flush(Host);
+    }
 }
 
 
@@ -955,11 +1009,9 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
 {
     if (!Host) return 0;
 
-    // unreliable sequenced: eliminates ENet ACK overhead and head-of-line
-    // blocking.  The DS WiFi protocol has its own retry mechanism, so
-    // reliable delivery at the transport layer is redundant and adds
-    // significant latency on every packet.
-    u32 flags = 0;
+    std::lock_guard<std::mutex> lock(ENetMutex);
+
+    u32 flags = ENET_PACKET_FLAG_RELIABLE;
 
     ENetPacket* enetpacket = enet_packet_create(nullptr, sizeof(MPPacketHeader)+len, flags);
 
@@ -978,6 +1030,7 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
     else
         enet_host_broadcast(Host, Chan_MP, enetpacket);
 
+    enet_host_flush(Host);
     return len;
 }
 
@@ -986,6 +1039,8 @@ int LAN::RecvPacketGeneric(u8* packet, bool block, u64* timestamp)
     if (!Host) return 0;
 
     ProcessLAN(block ? 2 : 1);
+
+    std::lock_guard<std::mutex> rxlock(RXQueueMutex);
     if (RXQueue.empty()) return 0;
 
     ENetPacket* enetpacket = RXQueue.front();
@@ -1014,46 +1069,32 @@ int LAN::RecvPacketGeneric(u8* packet, bool block, u64* timestamp)
 
 int LAN::SendPacket(int inst, u8* packet, int len, u64 timestamp)
 {
-    int ret = SendPacketGeneric(0, packet, len, timestamp);
-    if (Host) enet_host_flush(Host);
-    return ret;
+    return SendPacketGeneric(0, packet, len, timestamp);
 }
 
 int LAN::RecvPacket(int inst, u8* packet, u64* timestamp)
 {
-    if (Host) enet_host_flush(Host);
-    int ret = RecvPacketGeneric(packet, false, timestamp);
-    return ret;
+    return RecvPacketGeneric(packet, false, timestamp);
 }
-
 
 int LAN::SendCmd(int inst, u8* packet, int len, u64 timestamp)
 {
-    int ret = SendPacketGeneric(1, packet, len, timestamp);
-    if (Host) enet_host_flush(Host);
-    return ret;
+    return SendPacketGeneric(1, packet, len, timestamp);
 }
 
 int LAN::SendReply(int inst, u8* packet, int len, u64 timestamp, u16 aid)
 {
-    int ret = SendPacketGeneric(2 | (aid<<16), packet, len, timestamp);
-    if (Host) enet_host_flush(Host);
-    return ret;
+    return SendPacketGeneric(2 | (aid<<16), packet, len, timestamp);
 }
 
 int LAN::SendAck(int inst, u8* packet, int len, u64 timestamp)
 {
-    int ret = SendPacketGeneric(3, packet, len, timestamp);
-    if (Host) enet_host_flush(Host);
-    return ret;
+    return SendPacketGeneric(3, packet, len, timestamp);
 }
 
 int LAN::RecvHostPacket(int inst, u8* packet, u64* timestamp)
 {
-    if (Host) enet_host_flush(Host);
-
-    int ret = RecvPacketGeneric(packet, true, timestamp);
-    return ret;
+    return RecvPacketGeneric(packet, true, timestamp);
 }
 
 u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
@@ -1062,108 +1103,67 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 
     u16 ret = 0;
     u16 myinstmask = 1 << MyPlayer.ID;
+    u16 connmask = ConnectedBitmask.load(std::memory_order_relaxed);
 
-    if ((myinstmask & ConnectedBitmask) == ConnectedBitmask)
+    if ((myinstmask & connmask) == connmask)
         return 0;
-
-    // flush pending outgoing packets first for faster round-trip
-    enet_host_flush(Host);
-
-    // first drain any already-queued packets without blocking
-    ProcessLAN(0);
 
     u32 timeout_start = (u32)Platform::GetMSCount();
 
     for (;;)
     {
-        // process queued packets
-        while (!RXQueue.empty())
+        // drain queued reply packets (network thread fills the queue)
         {
-            ENetPacket* enetpacket = RXQueue.front();
-            RXQueue.pop();
-            MPPacketHeader* header = (MPPacketHeader*)&enetpacket->data[0];
-            bool good = true;
-            if ((header->Type & 0xFFFF) != 2)
-                good = false;
-            else if (header->Timestamp < (timestamp - 0x100000))
-                good = false;
+            std::lock_guard<std::mutex> rxlock(RXQueueMutex);
 
-            if (good)
+            while (!RXQueue.empty())
             {
-                u32 len = header->Length;
-                if (len)
+                ENetPacket* enetpacket = RXQueue.front();
+                RXQueue.pop();
+                MPPacketHeader* header = (MPPacketHeader*)&enetpacket->data[0];
+
+                bool good = true;
+                if ((header->Type & 0xFFFF) != 2)
+                    good = false;
+                else if (header->Timestamp < (timestamp - 0x100000))
+                    good = false;
+
+                if (good)
                 {
-                    if (len > 1024) len = 1024;
+                    u32 len = header->Length;
+                    if (len)
+                    {
+                        if (len > 1024) len = 1024;
 
-                    u32 aid = header->Type >> 16;
-                    memcpy(&packets[(aid-1)*1024], &enetpacket->data[sizeof(MPPacketHeader)], len);
+                        u32 aid = header->Type >> 16;
+                        memcpy(&packets[(aid-1)*1024],
+                               &enetpacket->data[sizeof(MPPacketHeader)], len);
 
-                    ret |= (1<<aid);
+                        ret |= (1<<aid);
+                    }
+
+                    myinstmask |= (1<<header->SenderID);
+                    connmask = ConnectedBitmask.load(std::memory_order_relaxed);
+                    if (((myinstmask & connmask) == connmask) ||
+                        ((ret & aidmask) == aidmask))
+                    {
+                        enet_packet_destroy(enetpacket);
+                        return ret;
+                    }
                 }
 
-                myinstmask |= (1<<header->SenderID);
-                if (((myinstmask & ConnectedBitmask) == ConnectedBitmask) ||
-                    ((ret & aidmask) == aidmask))
-                {
-                    // all the clients have sent their reply
-                    enet_packet_destroy(enetpacket);
-                    return ret;
-                }
+                enet_packet_destroy(enetpacket);
             }
-            else
-            {
-            }
-
-            enet_packet_destroy(enetpacket);
         }
 
-        // check if we've exceeded the timeout
+        // check timeout
         u32 now = (u32)Platform::GetMSCount();
         int remaining = MPRecvTimeout - (int)(now - timeout_start);
         if (remaining <= 0)
             return ret;
 
-        // poll for more packets with short intervals for responsiveness
-        int poll_timeout = (remaining > 1) ? 1 : remaining;
-        ENetEvent event;
-        if (enet_host_service(Host, &event, poll_timeout) > 0)
-        {
-            if (event.type == ENET_EVENT_TYPE_RECEIVE && event.channelID == Chan_MP)
-            {
-                MPPacketHeader* header = (MPPacketHeader*)&event.packet->data[0];
-
-                bool good = true;
-                if (event.packet->dataLength < sizeof(MPPacketHeader))
-                    good = false;
-                else if (header->Magic != 0x4946494E)
-                    good = false;
-                else if (header->SenderID == MyPlayer.ID)
-                    good = false;
-
-                if (!good)
-                {
-                    enet_packet_destroy(event.packet);
-                }
-                else
-                {
-                    header->Magic = (u32)Platform::GetMSCount();
-                    event.packet->userData = event.peer;
-                    RXQueue.push(event.packet);
-                }
-            }
-            else
-            {
-                ProcessEvent(event);
-            }
-        }
-        else
-        {
-            // no events in this poll interval; continue if total timeout not expired
-            u32 now2 = (u32)Platform::GetMSCount();
-            int remaining2 = MPRecvTimeout - (int)(now2 - timeout_start);
-            if (remaining2 <= 0)
-                return ret;
-        }
+        // brief sleep -- network thread keeps filling the queue
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 
