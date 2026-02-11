@@ -316,6 +316,20 @@ void Log(LogLevel level, const char* fmt, ...)
     va_start(args, fmt);
     vprintf(fmt, args);
     va_end(args);
+
+    // Also write to log file for diagnosis
+    static FILE* logfile = nullptr;
+    if (!logfile)
+    {
+        logfile = fopen("melonDS_log.txt", "w");
+        if (logfile) setvbuf(logfile, nullptr, _IONBF, 0);
+    }
+    if (logfile)
+    {
+        va_start(args, fmt);
+        vfprintf(logfile, fmt, args);
+        va_end(args);
+    }
 }
 
 Thread* Thread_Create(std::function<void()> func)
