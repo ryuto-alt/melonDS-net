@@ -1764,8 +1764,14 @@ void Wifi::USTimer(u32 param)
 
         if (USTimestamp >= NextSync)
         {
-            // TODO: not do this every tick if it fails to receive a frame!
-            CheckRX(2);
+            if (!CheckRX(2))
+            {
+                // Don't retry every 8us tick -- advance NextSync to avoid
+                // tight polling that blocks the emulation.
+                // 128us gives ~7800 retries/sec which is responsive enough
+                // to pick up packets promptly when they arrive.
+                NextSync = USTimestamp + 128;
+            }
         }
     }
 

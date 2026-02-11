@@ -849,7 +849,11 @@ void LAN::ProcessLAN(int type)
         }
     }
 
-    int timeout = (type == 2) ? MPRecvTimeout : 0;
+    // type 2 (MP host frame wait) uses non-blocking mode:
+    // the WiFi emulation layer retries on its own schedule,
+    // so we just check for already-arrived packets without blocking.
+    // This prevents each 8us emulated tick from blocking 50ms on the network.
+    int timeout = 0;
     time_last = (u32)Platform::GetMSCount();
 
     ENetEvent event;
@@ -878,24 +882,11 @@ void LAN::ProcessLAN(int type)
 
                 event.packet->userData = event.peer;
                 RXQueue.push(event.packet);
-
-                // After receiving an MP frame, switch to non-blocking mode
-                // to drain any remaining queued packets without waiting
-                timeout = 0;
             }
         }
         else
         {
             ProcessEvent(event);
-        }
-
-        if (type == 2 && timeout > 0)
-        {
-            u32 time = (u32)Platform::GetMSCount();
-            if (time < time_last) return;
-            timeout -= (int)(time - time_last);
-            if (timeout <= 0) return;
-            time_last = time;
         }
     }
 }
@@ -1147,7 +1138,7 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         }
 
         // poll for more packets with short intervals for responsiveness
-        int poll_timeout = (remaining > 5) ? 5 : remaining;
+        int poll_timeout = (remaining > 1) ? 1 : remaining;
         ENetEvent event;
         if (enet_host_service(Host, &event, poll_timeout) > 0)
         {
