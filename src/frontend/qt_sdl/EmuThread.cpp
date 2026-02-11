@@ -25,6 +25,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <thread>
 
 #include <SDL2/SDL.h>
 
@@ -54,6 +55,7 @@
 #include "Savestate.h"
 
 #include "EmuInstance.h"
+#include "NetplaySession.h"
 
 using namespace melonDS;
 
@@ -252,25 +254,60 @@ void EmuThread::run()
             }
 
             // process input and hotkeys
-            emuInstance->nds->SetKeyMask(emuInstance->inputMask);
+            NetplaySession* netplaySession = emuInstance->getNetplaySession();
 
-            if (emuInstance->isTouching)
-                emuInstance->nds->TouchScreen(emuInstance->touchX, emuInstance->touchY);
-            else
-                emuInstance->nds->ReleaseScreen();
-
-            if (emuInstance->hotkeyPressed(HK_Lid))
+            if (netplaySession && netplaySession->IsActive())
             {
-                bool lid = !emuInstance->nds->IsLidClosed();
-                emuInstance->nds->SetLidClosed(lid);
-                emuInstance->osdAddMessage(0, lid ? "Lid closed" : "Lid opened");
+                // Netplay mode: capture input, send over network, run all instances
+                InputFrame localInput;
+                localInput.FrameNum = netplaySession->GetFrameNum() + netplaySession->GetInputDelay();
+                localInput.KeyMask = emuInstance->inputMask;
+                localInput.Touching = emuInstance->isTouching ? 1 : 0;
+                localInput.TouchX = emuInstance->touchX;
+                localInput.TouchY = emuInstance->touchY;
+                localInput.LidClosed = 0;
+                localInput.Checksum = 0;
+
+                if (emuInstance->hotkeyPressed(HK_Lid))
+                    localInput.LidClosed = 1;
+
+                netplaySession->SetLocalInput(localInput);
+                netplaySession->SendLocalInput(localInput);
+                netplaySession->ProcessNetwork();
+
+                // Wait until all player inputs are available for this frame
+                while (!netplaySession->ReadyForFrame(netplaySession->GetFrameNum()))
+                {
+                    netplaySession->ProcessNetwork();
+                    std::this_thread::yield();
+                }
+            }
+            else
+            {
+                emuInstance->nds->SetKeyMask(emuInstance->inputMask);
+
+                if (emuInstance->isTouching)
+                    emuInstance->nds->TouchScreen(emuInstance->touchX, emuInstance->touchY);
+                else
+                    emuInstance->nds->ReleaseScreen();
+
+                if (emuInstance->hotkeyPressed(HK_Lid))
+                {
+                    bool lid = !emuInstance->nds->IsLidClosed();
+                    emuInstance->nds->SetLidClosed(lid);
+                    emuInstance->osdAddMessage(0, lid ? "Lid closed" : "Lid opened");
+                }
             }
 
             // auto screen layout
             {
+                NDS* displayNDS = (netplaySession && netplaySession->IsActive())
+                    ? netplaySession->GetDisplayInstance()
+                    : emuInstance->nds;
+
                 mainScreenPos[2] = mainScreenPos[1];
                 mainScreenPos[1] = mainScreenPos[0];
-                mainScreenPos[0] = emuInstance->nds->PowerControl9 >> 15;
+                mainScreenPos[0] = displayNDS->PowerControl9 >> 15;
 
                 int guess;
                 if (mainScreenPos[0] == mainScreenPos[2] &&
@@ -298,7 +335,11 @@ void EmuThread::run()
 
             // emulate
             u32 nlines;
-            if (emuInstance->nds->GPU.GetRenderer().NeedsShaderCompile())
+            if (netplaySession && netplaySession->IsActive())
+            {
+                nlines = netplaySession->RunFrame();
+            }
+            else if (emuInstance->nds->GPU.GetRenderer().NeedsShaderCompile())
             {
                 compileShaders();
                 nlines = 1;

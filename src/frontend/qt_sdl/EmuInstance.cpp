@@ -46,6 +46,8 @@
 #include "RTC.h"
 #include "DSi_I2C.h"
 #include "FreeBIOS.h"
+#include "NetplaySession.h"
+#include "Args.h"
 #include "main.h"
 
 using std::make_unique;
@@ -816,6 +818,67 @@ void EmuInstance::undoStateLoad()
     // what do we do if it doesn't???
     // but it should work.
     nds->DoSavestate(backupState.get());
+}
+
+
+// ---- Netplay session management ----
+
+bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inputDelay)
+{
+    stopNetplaySession();
+
+    netplaySession = std::make_unique<NetplaySession>();
+
+    if (!netplaySession->Init(localPlayerID, numPlayers, inputDelay))
+    {
+        netplaySession.reset();
+        return false;
+    }
+
+    // Build NDS instances using current config
+    auto argsBuilder = [this]() -> NDSArgs {
+        NDSArgs args {
+            loadARM9BIOS(),
+            loadARM7BIOS(),
+            generateFirmware(0),
+        };
+
+        auto& jitcfg = globalCfg;
+        #ifdef JIT_ENABLED
+        if (jitcfg.GetBool("JIT.Enable"))
+        {
+            JITArgs jitargs;
+            jitargs.MaxBlockSize = jitcfg.GetInt("JIT.MaxBlockSize");
+            jitargs.LiteralOptimizations = jitcfg.GetBool("JIT.LiteralOptimizations");
+            jitargs.BranchOptimizations = jitcfg.GetBool("JIT.BranchOptimizations");
+            jitargs.FastMemory = jitcfg.GetBool("JIT.FastMemory");
+            args.JIT = jitargs;
+        }
+        else
+        {
+            args.JIT = std::nullopt;
+        }
+        #endif
+
+        return args;
+    };
+
+    if (!netplaySession->CreateInstances(argsBuilder))
+    {
+        netplaySession.reset();
+        return false;
+    }
+
+    return true;
+}
+
+void EmuInstance::stopNetplaySession()
+{
+    if (netplaySession)
+    {
+        netplaySession->DeInit();
+        netplaySession.reset();
+    }
 }
 
 

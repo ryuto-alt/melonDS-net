@@ -19,23 +19,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <queue>
-
-#include <enet/enet.h>
 
 #include <QStandardItemModel>
-#include <QProcess>
+#include <QMessageBox>
 
 #include "NDS.h"
 #include "NDSCart.h"
 #include "main.h"
-//#include "IPC.h"
 #include "NetplayDialog.h"
-//#include "Input.h"
-//#include "ROMManager.h"
+#include "EmuInstance.h"
 #include "Config.h"
-#include "Savestate.h"
 #include "Platform.h"
+#include "NetplaySession.h"
+#include "NetplayProtocol.h"
 
 #include "ui_NetplayStartHostDialog.h"
 #include "ui_NetplayStartClientDialog.h"
@@ -44,16 +40,12 @@
 using namespace melonDS;
 
 
-extern EmuThread* emuThread;
-NetplayDialog* netplayDlg;
-
-
 NetplayStartHostDialog::NetplayStartHostDialog(QWidget* parent) : QDialog(parent), ui(new Ui::NetplayStartHostDialog)
 {
     ui->setupUi(this);
     setAttribute(Qt::WA_DeleteOnClose);
 
-    ui->txtPort->setText("8064");
+    ui->txtPort->setText(QString::number(kNetplayDefaultPort));
 }
 
 NetplayStartHostDialog::~NetplayStartHostDialog()
@@ -63,7 +55,10 @@ NetplayStartHostDialog::~NetplayStartHostDialog()
 
 void NetplayStartHostDialog::done(int r)
 {
-    if (!((MainWindow*)parent())->getEmuInstance())
+    MainWindow* mainWin = (MainWindow*)parent();
+    EmuInstance* inst = mainWin->getEmuInstance();
+
+    if (!inst)
     {
         QDialog::done(r);
         return;
@@ -72,13 +67,48 @@ void NetplayStartHostDialog::done(int r)
     if (r == QDialog::Accepted)
     {
         std::string player = ui->txtPlayerName->text().toStdString();
+        int numPlayers = ui->sbNumPlayers->value();
+        int inputDelay = ui->sbInputDelay->value();
         int port = ui->txtPort->text().toInt();
 
-        // TODO validate input!!
+        if (player.empty())
+        {
+            QMessageBox::warning(this, "Error", "Please enter a player name.");
+            return;
+        }
 
-        netplayDlg = NetplayDialog::openDlg(parentWidget());
+        if (!inst->getNDS()->CartInserted())
+        {
+            QMessageBox::warning(this, "Error", "Please load a ROM before starting netplay.");
+            return;
+        }
 
-        Netplay::StartHost(player.c_str(), port);
+        // Start the netplay session as host (player 0)
+        if (!inst->startNetplaySession(0, numPlayers, inputDelay))
+        {
+            QMessageBox::critical(this, "Error", "Failed to initialize netplay session.");
+            return;
+        }
+
+        // Start network host
+        NetplaySession* session = inst->getNetplaySession();
+        if (!session->HostStart(port))
+        {
+            inst->stopNetplaySession();
+            QMessageBox::critical(this, "Error", "Failed to start host on the specified port.");
+            return;
+        }
+
+        // Save settings
+        auto& cfg = inst->getGlobalConfig();
+        cfg.SetString("Netplay.PlayerName", player);
+        cfg.SetInt("Netplay.Port", port);
+        cfg.SetInt("Netplay.NumPlayers", numPlayers);
+        cfg.SetInt("Netplay.InputDelay", inputDelay);
+        Config::Save();
+
+        // Open session dialog
+        NetplayDialog::openDlg(parentWidget(), inst);
     }
 
     QDialog::done(r);
@@ -90,7 +120,7 @@ NetplayStartClientDialog::NetplayStartClientDialog(QWidget* parent) : QDialog(pa
     ui->setupUi(this);
     setAttribute(Qt::WA_DeleteOnClose);
 
-    ui->txtPort->setText("8064");
+    ui->txtPort->setText(QString::number(kNetplayDefaultPort));
 }
 
 NetplayStartClientDialog::~NetplayStartClientDialog()
@@ -100,7 +130,10 @@ NetplayStartClientDialog::~NetplayStartClientDialog()
 
 void NetplayStartClientDialog::done(int r)
 {
-    if (!((MainWindow*)parent())->getEmuInstance())
+    MainWindow* mainWin = (MainWindow*)parent();
+    EmuInstance* inst = mainWin->getEmuInstance();
+
+    if (!inst)
     {
         QDialog::done(r);
         return;
@@ -112,18 +145,52 @@ void NetplayStartClientDialog::done(int r)
         std::string host = ui->txtIPAddress->text().toStdString();
         int port = ui->txtPort->text().toInt();
 
-        // TODO validate input!!
+        if (player.empty() || host.empty())
+        {
+            QMessageBox::warning(this, "Error", "Please enter player name and host address.");
+            return;
+        }
 
-        netplayDlg = NetplayDialog::openDlg(parentWidget());
+        if (!inst->getNDS()->CartInserted())
+        {
+            QMessageBox::warning(this, "Error", "Please load the same ROM as the host before joining.");
+            return;
+        }
 
-        Netplay::StartClient(player.c_str(), host.c_str(), port);
+        // Client will receive numPlayers and inputDelay from host during handshake.
+        // For now, use defaults - they'll be updated after connection.
+        if (!inst->startNetplaySession(1, 2, 4))
+        {
+            QMessageBox::critical(this, "Error", "Failed to initialize netplay session.");
+            return;
+        }
+
+        NetplaySession* session = inst->getNetplaySession();
+        if (!session->ClientConnect(host.c_str(), port))
+        {
+            inst->stopNetplaySession();
+            QMessageBox::critical(this, "Error",
+                QString("Failed to connect to %1:%2").arg(QString::fromStdString(host)).arg(port));
+            return;
+        }
+
+        // Save settings
+        auto& cfg = inst->getGlobalConfig();
+        cfg.SetString("Netplay.PlayerName", player);
+        cfg.SetString("Netplay.HostAddress", host);
+        cfg.SetInt("Netplay.Port", port);
+        Config::Save();
+
+        // Open session dialog
+        NetplayDialog::openDlg(parentWidget(), inst);
     }
 
     QDialog::done(r);
 }
 
 
-NetplayDialog::NetplayDialog(QWidget* parent) : QDialog(parent), ui(new Ui::NetplayDialog)
+NetplayDialog::NetplayDialog(QWidget* parent, EmuInstance* inst)
+    : QDialog(parent), ui(new Ui::NetplayDialog), emuInstance(inst)
 {
     ui->setupUi(this);
     setAttribute(Qt::WA_DeleteOnClose);
@@ -131,63 +198,109 @@ NetplayDialog::NetplayDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Netp
     QStandardItemModel* model = new QStandardItemModel();
     ui->tvPlayerList->setModel(model);
 
-    connect(this, &NetplayDialog::sgUpdatePlayerList, this, &NetplayDialog::doUpdatePlayerList);
+    connect(ui->btnDisconnect, &QPushButton::clicked, this, &NetplayDialog::onDisconnect);
+
+    // Update timer for status display
+    updateTimer = new QTimer(this);
+    connect(updateTimer, &QTimer::timeout, this, &NetplayDialog::onUpdateTimer);
+    updateTimer->start(500); // update every 500ms
+
+    NetplaySession* session = inst->getNetplaySession();
+    if (session)
+    {
+        if (session->IsHost())
+            ui->lblStatus->setText("Status: Hosting (waiting for players...)");
+        else
+            ui->lblStatus->setText("Status: Connected to host");
+
+        // Set up desync callback
+        session->SetDesyncCallback([this](melonDS::u32 frame, melonDS::u64 localHash, melonDS::u64 remoteHash) {
+            // Qt signal/slot across threads - use QMetaObject::invokeMethod
+            QMetaObject::invokeMethod(this, [this, frame]() {
+                setDesyncWarning(QString("DESYNC detected at frame %1!").arg(frame));
+            }, Qt::QueuedConnection);
+        });
+
+        session->SetDisconnectCallback([this](int playerID, melonDS::NetplayDisconnectReason reason) {
+            QMetaObject::invokeMethod(this, [this, playerID]() {
+                setStatus(QString("Player %1 disconnected").arg(playerID));
+            }, Qt::QueuedConnection);
+        });
+    }
 }
 
 NetplayDialog::~NetplayDialog()
 {
+    if (updateTimer)
+    {
+        updateTimer->stop();
+        delete updateTimer;
+    }
     delete ui;
 }
 
 void NetplayDialog::done(int r)
 {
-    // ???
-
+    if (updateTimer) updateTimer->stop();
     QDialog::done(r);
 }
 
-void NetplayDialog::updatePlayerList(Netplay::Player* players, int num)
+void NetplayDialog::onDisconnect()
 {
-    emit sgUpdatePlayerList(players, num);
+    if (emuInstance)
+    {
+        emuInstance->stopNetplaySession();
+    }
+    close();
 }
 
-void NetplayDialog::doUpdatePlayerList(Netplay::Player* players, int num)
+void NetplayDialog::onUpdateTimer()
 {
-    QStandardItemModel* model = (QStandardItemModel*)ui->tvPlayerList->model();
+    if (!emuInstance) return;
 
-    model->clear();
-    model->setRowCount(num);
-
-    // TODO: remove IP column in final product
-
-    const QStringList header = {"#", "Player", "Status", "Ping", "IP"};
-    model->setHorizontalHeaderLabels(header);
-
-    for (int i = 0; i < num; i++)
+    NetplaySession* session = emuInstance->getNetplaySession();
+    if (!session || !session->IsActive())
     {
-        Netplay::Player* player = &players[i];
+        ui->lblStatus->setText("Status: Disconnected");
+        return;
+    }
 
-        QString id = QString("%0").arg(player->ID+1);
+    // Update frame counter
+    QString status;
+    if (session->IsHost())
+        status = QString("Status: Hosting | Frame: %1").arg(session->GetFrameNum());
+    else
+        status = QString("Status: Connected | Frame: %1").arg(session->GetFrameNum());
+
+    ui->lblStatus->setText(status);
+
+    // Update player list
+    QStandardItemModel* model = (QStandardItemModel*)ui->tvPlayerList->model();
+    model->clear();
+
+    const QStringList header = {"#", "Player", "Status"};
+    model->setHorizontalHeaderLabels(header);
+    model->setRowCount(session->GetNumInstances());
+
+    for (int i = 0; i < session->GetNumInstances(); i++)
+    {
+        QString id = QString("%1").arg(i);
         model->setItem(i, 0, new QStandardItem(id));
 
-        QString name = player->Name;
+        QString name = (i == session->GetLocalPlayerID()) ? "You" : QString("Player %1").arg(i);
         model->setItem(i, 1, new QStandardItem(name));
 
-        QString status;
-        switch (player->Status)
-        {
-            case 1: status = ""; break;
-            case 2: status = "Host"; break;
-            default: status = "ded"; break;
-        }
-        model->setItem(i, 2, new QStandardItem(status));
-
-        // TODO: ping
-        model->setItem(i, 3, new QStandardItem("x"));
-
-        char ip[32];
-        u32 addr = player->Address;
-        snprintf(ip, sizeof(ip), "%d.%d.%d.%d", addr&0xFF, (addr>>8)&0xFF, (addr>>16)&0xFF, addr>>24);
-        model->setItem(i, 4, new QStandardItem(ip));
+        QString playerStatus = session->GetInstance(i) ? "Active" : "N/A";
+        model->setItem(i, 2, new QStandardItem(playerStatus));
     }
+}
+
+void NetplayDialog::setStatus(const QString& status)
+{
+    ui->lblStatus->setText("Status: " + status);
+}
+
+void NetplayDialog::setDesyncWarning(const QString& warning)
+{
+    ui->lblDesync->setText(warning);
 }

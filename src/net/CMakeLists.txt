@@ -9,6 +9,8 @@ add_library(net-utils STATIC
     LAN.cpp
     Netplay.cpp
     MPInterface.cpp
+    NetplayProtocol.cpp
+    NetplaySession.cpp
 )
 
 target_include_directories(net-utils PUBLIC

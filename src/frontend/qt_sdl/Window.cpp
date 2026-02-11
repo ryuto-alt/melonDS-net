@@ -73,6 +73,7 @@
 #include "Savestate.h"
 #include "MPInterface.h"
 #include "LANDialog.h"
+#include "NetplayDialog.h"
 
 //#include "main_shaders.h"
 
@@ -462,16 +463,13 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
                 actLANStartClient = submenu->addAction("LANゲームに参加");
                 connect(actLANStartClient, &QAction::triggered, this, &MainWindow::onLANStartClient);
 
-                /*submenu->addSeparator();
+                submenu->addSeparator();
 
-                actNPStartHost = submenu->addAction("NETPLAY HOST");
+                actNPStartHost = submenu->addAction("Mirror Netplay Host");
                 connect(actNPStartHost, &QAction::triggered, this, &MainWindow::onNPStartHost);
 
-                actNPStartClient = submenu->addAction("NETPLAY CLIENT");
+                actNPStartClient = submenu->addAction("Mirror Netplay Join");
                 connect(actNPStartClient, &QAction::triggered, this, &MainWindow::onNPStartClient);
-
-                actNPTest = submenu->addAction("NETPLAY GO");
-                connect(actNPTest, &QAction::triggered, this, &MainWindow::onNPTest);*/
             }
         }
         {
@@ -1788,20 +1786,12 @@ void MainWindow::onLANStartClient()
 
 void MainWindow::onNPStartHost()
 {
-    //Netplay::StartHost();
-    //NetplayStartHostDialog::openDlg(this);
+    NetplayStartHostDialog::openDlg(this);
 }
 
 void MainWindow::onNPStartClient()
 {
-    //Netplay::StartClient();
-    //NetplayStartClientDialog::openDlg(this);
-}
-
-void MainWindow::onNPTest()
-{
-    // HAX
-    //Netplay::StartGame();
+    NetplayStartClientDialog::openDlg(this);
 }
 
 void MainWindow::updateMPInterface(MPInterfaceType type)
@@ -1814,9 +1804,8 @@ void MainWindow::updateMPInterface(MPInterfaceType type)
     actMPNewInstance->setEnabled(enable);
     actLANStartHost->setEnabled(enable);
     actLANStartClient->setEnabled(enable);
-    /*actNPStartHost->setEnabled(enable);
+    actNPStartHost->setEnabled(enable);
     actNPStartClient->setEnabled(enable);
-    actNPTest->setEnabled(enable);*/
 }
 
 bool MainWindow::lanWarning(bool host)

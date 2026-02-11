@@ -38,6 +38,7 @@
 #include "main.h"
 #include "CameraManager.h"
 #include "Net.h"
+#include "NetplaySession.h"
 #include "MPInterface.h"
 #include "SPI_Firmware.h"
 
@@ -486,58 +487,78 @@ void WriteDateTime(int year, int month, int day, int hour, int minute, int secon
 }
 
 
+// Helper: extract instance ID and MP interface from userdata.
+// In netplay mode, userdata points to NetplayInstanceData with a magic tag;
+// in normal mode, it points to EmuInstance.
+static int GetMPInstID(void* userdata)
+{
+    // Check if this is a NetplayInstanceData by reading the magic field
+    NetplayInstanceData* npd = (NetplayInstanceData*)userdata;
+    if (npd->Magic == NetplayInstanceData::kMagic)
+        return npd->InstID;
+    return ((EmuInstance*)userdata)->getInstanceID();
+}
+
+static MPInterface& GetMPInterface(void* userdata)
+{
+    NetplayInstanceData* npd = (NetplayInstanceData*)userdata;
+    if (npd->Magic == NetplayInstanceData::kMagic)
+        return ((NetplaySession*)npd->Session)->GetLocalMP();
+    return MPInterface::Get();
+}
+
 void MP_Begin(void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
-    MPInterface::Get().Begin(inst);
+    int inst = GetMPInstID(userdata);
+    GetMPInterface(userdata).Begin(inst);
 }
 
 void MP_End(void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
-    MPInterface::Get().End(inst);
+    int inst = GetMPInstID(userdata);
+    GetMPInterface(userdata).End(inst);
 }
 
 int MP_SendPacket(u8* data, int len, u64 timestamp, void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
-    return MPInterface::Get().SendPacket(inst, data, len, timestamp);
+    int inst = GetMPInstID(userdata);
+    return GetMPInterface(userdata).SendPacket(inst, data, len, timestamp);
 }
 
 int MP_RecvPacket(u8* data, u64* timestamp, void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
-    return MPInterface::Get().RecvPacket(inst, data, timestamp);
+    int inst = GetMPInstID(userdata);
+    return GetMPInterface(userdata).RecvPacket(inst, data, timestamp);
 }
 
 int MP_SendCmd(u8* data, int len, u64 timestamp, void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
-    return MPInterface::Get().SendCmd(inst, data, len, timestamp);
+    int inst = GetMPInstID(userdata);
+    return GetMPInterface(userdata).SendCmd(inst, data, len, timestamp);
 }
 
 int MP_SendReply(u8* data, int len, u64 timestamp, u16 aid, void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
-    return MPInterface::Get().SendReply(inst, data, len, timestamp, aid);
+    int inst = GetMPInstID(userdata);
+    return GetMPInterface(userdata).SendReply(inst, data, len, timestamp, aid);
 }
 
 int MP_SendAck(u8* data, int len, u64 timestamp, void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
-    return MPInterface::Get().SendAck(inst, data, len, timestamp);
+    int inst = GetMPInstID(userdata);
+    return GetMPInterface(userdata).SendAck(inst, data, len, timestamp);
 }
 
 int MP_RecvHostPacket(u8* data, u64* timestamp, void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
-    return MPInterface::Get().RecvHostPacket(inst, data, timestamp);
+    int inst = GetMPInstID(userdata);
+    return GetMPInterface(userdata).RecvHostPacket(inst, data, timestamp);
 }
 
 u16 MP_RecvReplies(u8* data, u64 timestamp, u16 aidmask, void* userdata)
 {
-    int inst = ((EmuInstance*)userdata)->getInstanceID();
-    return MPInterface::Get().RecvReplies(inst, data, timestamp, aidmask);
+    int inst = GetMPInstID(userdata);
+    return GetMPInterface(userdata).RecvReplies(inst, data, timestamp, aidmask);
 }
 
 
@@ -567,6 +588,12 @@ void Mic_Stop(void* userdata)
 
 int Mic_ReadInput(s16* data, int maxlength, void* userdata)
 {
+    // During netplay, inject silence to ensure determinism across all PCs
+    if (NetplaySession::IsNetplayActive())
+    {
+        memset(data, 0, maxlength * sizeof(s16));
+        return maxlength;
+    }
     return ((EmuInstance*)userdata)->micReadInput(data, maxlength);
 }
 

@@ -28,6 +28,7 @@
 #include "Window.h"
 #include "Config.h"
 #include "SaveManager.h"
+#include "NetplaySession.h"
 
 const int kMaxWindows = 4;
 
@@ -91,6 +92,11 @@ public:
     int getConsoleType() { return consoleType; }
     EmuThread* getEmuThread() { return emuThread; }
     melonDS::NDS* getNDS() { return nds; }
+
+    // Netplay session management
+    melonDS::NetplaySession* getNetplaySession() { return netplaySession.get(); }
+    bool startNetplaySession(int localPlayerID, int numPlayers, int inputDelay = 4);
+    void stopNetplaySession();
 
     MainWindow* getMainWindow() { return mainWindow; }
     int getNumWindows() { return numWindows; }
@@ -308,6 +314,8 @@ private:
 
     std::unique_ptr<melonDS::Savestate> backupState;
     bool savestateLoaded;
+
+    std::unique_ptr<melonDS::NetplaySession> netplaySession;
 
     std::unique_ptr<melonDS::ARCodeFile> cheatFile;
     bool cheatsOn;

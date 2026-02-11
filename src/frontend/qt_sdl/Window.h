@@ -134,7 +134,6 @@ private slots:
     void onLANStartClient();
     void onNPStartHost();
     void onNPStartClient();
-    void onNPTest();
 
     void onOpenEmuSettings();
     void onEmuSettingsDialogFinished(int res);
@@ -258,7 +257,6 @@ public:
     QAction* actLANStartClient;
     QAction* actNPStartHost;
     QAction* actNPStartClient;
-    QAction* actNPTest;
 
     QAction* actEmuSettings;
 #ifdef __APPLE__

@@ -11,18 +11,53 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>ネットプレイ - melonDS</string>
+   <string>Mirror Netplay - melonDS</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_2">
    <item>
     <widget class="QLabel" name="lblStatus">
      <property name="text">
-      <string>ステータス</string>
+      <string>Status: Waiting...</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="lblPing">
+     <property name="text">
+      <string>Ping: --</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="lblDesync">
+     <property name="text">
+      <string/>
+     </property>
+     <property name="styleSheet">
+      <string>color: red;</string>
      </property>
     </widget>
    </item>
    <item>
     <widget class="QTreeView" name="tvPlayerList"/>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout">
+     <item>
+      <spacer name="horizontalSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btnDisconnect">
+       <property name="text">
+        <string>Disconnect</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
    </item>
   </layout>
  </widget>

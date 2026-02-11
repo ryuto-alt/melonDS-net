@@ -719,7 +719,7 @@ bool NDS::DoSavestate(Savestate* file)
     file->Var32(&NumLagFrames);
     file->Bool32(&LagFrameFlag);
 
-    // TODO: save KeyInput????
+    file->Var32(&KeyInput);
     file->VarArray(KeyCnt, 2*sizeof(u16));
     file->Var16(&RCnt);
 

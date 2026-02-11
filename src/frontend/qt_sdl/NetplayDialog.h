@@ -20,9 +20,9 @@
 #define NETPLAYDIALOG_H
 
 #include <QDialog>
+#include <QTimer>
 
 #include "types.h"
-#include "Netplay.h"
 
 namespace Ui
 {
@@ -31,9 +31,7 @@ namespace Ui
     class NetplayDialog;
 }
 
-class NetplayStartHostDialog;
-class NetplayStartClientDialog;
-class NetplayDialog;
+class EmuInstance;
 
 class NetplayStartHostDialog : public QDialog
 {
@@ -84,28 +82,28 @@ class NetplayDialog : public QDialog
 Q_OBJECT
 
 public:
-    explicit NetplayDialog(QWidget* parent);
+    explicit NetplayDialog(QWidget* parent, EmuInstance* inst);
     ~NetplayDialog();
 
-    static NetplayDialog* openDlg(QWidget* parent)
+    static NetplayDialog* openDlg(QWidget* parent, EmuInstance* inst)
     {
-        NetplayDialog* dlg = new NetplayDialog(parent);
+        NetplayDialog* dlg = new NetplayDialog(parent, inst);
         dlg->show();
         return dlg;
     }
 
-    void updatePlayerList(Netplay::Player* players, int num);
-
-signals:
-    void sgUpdatePlayerList(Netplay::Player* players, int num);
+    void setStatus(const QString& status);
+    void setDesyncWarning(const QString& warning);
 
 private slots:
     void done(int r);
-
-    void doUpdatePlayerList(Netplay::Player* players, int num);
+    void onDisconnect();
+    void onUpdateTimer();
 
 private:
     Ui::NetplayDialog* ui;
+    EmuInstance* emuInstance;
+    QTimer* updateTimer;
 };
 
 #endif // NETPLAYDIALOG_H
