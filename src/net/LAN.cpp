@@ -99,7 +99,7 @@ LAN::LAN() noexcept : Inited(false)
 
     ConnectedBitmask = 0;
 
-    MPRecvTimeout = 25;
+    MPRecvTimeout = 50;
     LastHostID = -1;
     LastHostPeer = nullptr;
 
@@ -943,6 +943,7 @@ void LAN::Begin(int inst)
     u8 cmd = Cmd_PlayerConnect;
     ENetPacket* pkt = enet_packet_create(&cmd, 1, ENET_PACKET_FLAG_RELIABLE);
     enet_host_broadcast(Host, Chan_Cmd, pkt);
+    enet_host_flush(Host);
 }
 
 void LAN::End(int inst)
@@ -955,6 +956,7 @@ void LAN::End(int inst)
     u8 cmd = Cmd_PlayerDisconnect;
     ENetPacket* pkt = enet_packet_create(&cmd, 1, ENET_PACKET_FLAG_RELIABLE);
     enet_host_broadcast(Host, Chan_Cmd, pkt);
+    enet_host_flush(Host);
 }
 
 
@@ -1059,22 +1061,13 @@ int LAN::SendAck(int inst, u8* packet, int len, u64 timestamp)
 
 int LAN::RecvHostPacket(int inst, u8* packet, u64* timestamp)
 {
-    if (LastHostID != -1)
-    {
-        if (!(ConnectedBitmask & (1<<LastHostID)))
-        {
-            Platform::Log(Platform::LogLevel::Debug, "LAN: RecvHost -> host gone (bitmask=%04X lasthost=%d)\n", ConnectedBitmask, LastHostID);
-            return -1;
-        }
-    }
-
     if (Host) enet_host_flush(Host);
 
     int ret = RecvPacketGeneric(packet, true, timestamp);
     if (ret > 0)
         Platform::Log(Platform::LogLevel::Debug, "LAN: RX host CMD len=%d\n", ret);
     else if (ret == 0)
-        Platform::Log(Platform::LogLevel::Debug, "LAN: RecvHost timeout (bitmask=%04X)\n", ConnectedBitmask);
+        Platform::Log(Platform::LogLevel::Debug, "LAN: RecvHost timeout (bitmask=%04X lasthost=%d)\n", ConnectedBitmask, LastHostID);
     return ret;
 }
 
@@ -1124,6 +1117,7 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
                     memcpy(&packets[(aid-1)*1024], &enetpacket->data[sizeof(MPPacketHeader)], len);
 
                     ret |= (1<<aid);
+                    Platform::Log(Platform::LogLevel::Debug, "LAN: RX reply aid=%d len=%d sender=%d\n", aid, len, header->SenderID);
                 }
 
                 myinstmask |= (1<<header->SenderID);
@@ -1135,6 +1129,10 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
                     return ret;
                 }
             }
+            else
+            {
+                Platform::Log(Platform::LogLevel::Debug, "LAN: RecvReplies discard pkt type=%04X\n", header->Type);
+            }
 
             enet_packet_destroy(enetpacket);
         }
@@ -1143,7 +1141,10 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         u32 now = (u32)Platform::GetMSCount();
         int remaining = MPRecvTimeout - (int)(now - timeout_start);
         if (remaining <= 0)
+        {
+            Platform::Log(Platform::LogLevel::Debug, "LAN: RecvReplies timeout ret=%04X bitmask=%04X\n", ret, ConnectedBitmask);
             return ret;
+        }
 
         // poll for more packets with short intervals for responsiveness
         int poll_timeout = (remaining > 5) ? 5 : remaining;
