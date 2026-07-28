@@ -125,6 +125,9 @@ void NetplaySession::DeInit()
 
 bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder, void* origUserdata)
 {
+    ArgsBuilder = argsBuilder;
+    OrigUserdata = origUserdata;
+
     for (int i = 0; i < NumInstances; i++)
     {
         NDSArgs args = argsBuilder();
@@ -199,6 +202,74 @@ bool NetplaySession::LoadROM(std::unique_ptr<NDSCart::CartCommon> cart)
 
     Log(LogLevel::Info, "Netplay: ROM loaded on all %d instances\n", NumInstances);
     return true;
+}
+
+bool NetplaySession::LoadROMData(const u8* romdata, u32 romlen)
+{
+    if (!romdata || romlen == 0 || NumInstances == 0)
+        return false;
+
+    // Keep our own copy: the client may have to rebuild its instances once the
+    // host reports the real player count, and the caller's buffer is long gone.
+    ROMData.assign(romdata, romdata + romlen);
+    ROMHash = XXH64(romdata, romlen, 0);
+
+    for (int i = 0; i < NumInstances; i++)
+    {
+        auto cart = NDSCart::ParseROM(ROMData.data(), romlen, &InstData[i]);
+        if (!cart)
+        {
+            Log(LogLevel::Error, "Netplay: failed to parse ROM for instance %d\n", i);
+            return false;
+        }
+
+        Instances[i]->SetNDSCart(std::move(cart));
+        Instances[i]->Reset();
+
+        if (Instances[i]->NeedsDirectBoot())
+            Instances[i]->SetupDirectBoot("");
+    }
+
+    Log(LogLevel::Info, "Netplay: ROM (%u bytes, hash %016llX) booted on %d instances\n",
+        romlen, (unsigned long long)ROMHash, NumInstances);
+    return true;
+}
+
+void NetplaySession::DestroyInstances()
+{
+    StopThreads();
+
+    for (int i = 0; i < kNetplayMaxPlayers; i++)
+    {
+        if (Instances[i])
+        {
+            LMP.End(i);
+            delete Instances[i];
+            Instances[i] = nullptr;
+        }
+    }
+    NumInstances = 0;
+}
+
+bool NetplaySession::RebuildInstances(int numPlayers)
+{
+    if (numPlayers < 2 || numPlayers > kNetplayMaxPlayers)
+        return false;
+    if (numPlayers == NumInstances)
+        return true;
+    if (!ArgsBuilder || ROMData.empty())
+        return false;
+
+    Log(LogLevel::Info, "Netplay: rebuilding %d -> %d instances\n", NumInstances, numPlayers);
+
+    std::vector<u8> rom = std::move(ROMData);
+    DestroyInstances();
+
+    NumInstances = numPlayers;
+    if (!CreateInstances(ArgsBuilder, OrigUserdata))
+        return false;
+
+    return LoadROMData(rom.data(), (u32)rom.size());
 }
 
 bool NetplaySession::TakeState(int inst, std::vector<u8>& out)
@@ -286,6 +357,8 @@ void NetplaySession::SetRemoteInput(int playerID, const InputFrame& input)
 
 bool NetplaySession::ReadyForFrame(u32 frameNum) const
 {
+    std::lock_guard<std::mutex> lock(InputMutex);
+
     u32 bufIdx = frameNum % INPUT_BUF_SIZE;
     for (int i = 0; i < NumInstances; i++)
     {
@@ -467,9 +540,17 @@ bool NetplaySession::HostStart(int port)
         return false;
 
     HostMode = true;
+    Stage.store(Stage_Idle);
 
     Transport.SetEventCallback([this](int peerIdx, bool connected) {
-        if (!connected && OnDisconnect)
+        if (connected)
+        {
+            // Sending a multi-megabyte savestate from inside the ENet poll is
+            // asking for trouble; queue it and do it right after the poll ends.
+            PendingSyncPeer = peerIdx;
+            Stage.store(Stage_Syncing);
+        }
+        else if (OnDisconnect)
         {
             OnDisconnect(peerIdx + 1, Disconnect_Normal);
         }
@@ -484,6 +565,7 @@ bool NetplaySession::ClientConnect(const char* host, int port)
         return false;
 
     HostMode = false;
+    Stage.store(Stage_Syncing);
 
     Transport.SetEventCallback([this](int peerIdx, bool connected) {
         if (!connected && OnDisconnect)
@@ -493,6 +575,44 @@ bool NetplaySession::ClientConnect(const char* host, int port)
     });
 
     return true;
+}
+
+// Host side of the handshake: tell the client what session it joined, ship it
+// an identical copy of every instance's state, then start both sides together.
+void NetplaySession::HostSyncPeer(int peerIdx)
+{
+    int playerID = peerIdx + 1;
+
+    MsgSessionOffer offer;
+    offer.Type = Msg_SessionOffer;
+    offer.ROMHash = ROMHash;
+    offer.NumPlayers = (u8)NumInstances;
+    offer.InputDelay = (u8)InputDelay;
+    Transport.SendTo(peerIdx, &offer, sizeof(offer), Chan_Control, true);
+
+    MsgSessionAccept accept;
+    accept.Type = Msg_SessionAccept;
+    accept.PlayerID = (u8)playerID;
+    Transport.SendTo(peerIdx, &accept, sizeof(accept), Chan_Control, true);
+
+    if (!HostSendStates(peerIdx))
+    {
+        Log(LogLevel::Error, "Netplay: failed to send states to peer %d\n", peerIdx);
+        Stage.store(Stage_Idle);
+        return;
+    }
+
+    // Chan_Control is reliable and ordered, so this lands after the last blob.
+    MsgStartGame start;
+    start.Type = Msg_StartGame;
+    start.Frame = CurrentFrame;
+    start.InputDelay = (u8)InputDelay;
+    Transport.SendTo(peerIdx, &start, sizeof(start), Chan_Control, true);
+
+    Log(LogLevel::Info, "Netplay: peer %d synced as player %d at frame %u\n",
+        peerIdx, playerID, CurrentFrame);
+
+    Stage.store(Stage_Running);
 }
 
 void NetplaySession::ProcessNetwork()
@@ -508,6 +628,13 @@ void NetplaySession::ProcessNetwork()
         else if (channel == Chan_Input)
             HandleInputMessage(peerIdx, data, len);
     });
+
+    if (HostMode && PendingSyncPeer >= 0)
+    {
+        int peer = PendingSyncPeer;
+        PendingSyncPeer = -1;
+        HostSyncPeer(peer);
+    }
 }
 
 void NetplaySession::SendLocalInput(const InputFrame& input)
@@ -535,11 +662,34 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         const MsgSessionOffer* msg = (const MsgSessionOffer*)data;
         Log(LogLevel::Info, "Netplay: received session offer (players: %d, delay: %d)\n",
             msg->NumPlayers, msg->InputDelay);
-        // Client accepts
-        MsgSessionAccept accept;
-        accept.Type = Msg_SessionAccept;
-        accept.PlayerID = 0; // will be assigned by host
-        Transport.SendTo(peerIdx, &accept, sizeof(accept), Chan_Control, true);
+
+        if (msg->ROMHash != ROMHash)
+        {
+            // Lockstep only works if both sides run byte-identical carts.
+            Log(LogLevel::Error, "Netplay: ROM mismatch (host %016llX, local %016llX)\n",
+                (unsigned long long)msg->ROMHash, (unsigned long long)ROMHash);
+            MsgDisconnect bye;
+            bye.Type = Msg_Disconnect;
+            bye.Reason = Disconnect_Error;
+            Transport.SendTo(peerIdx, &bye, sizeof(bye), Chan_Control, true);
+            Stage.store(Stage_Idle);
+            if (OnDisconnect) OnDisconnect(0, Disconnect_Error);
+            break;
+        }
+
+        if (!RebuildInstances(msg->NumPlayers))
+        {
+            Log(LogLevel::Error, "Netplay: cannot host %d players\n", msg->NumPlayers);
+            Stage.store(Stage_Idle);
+            break;
+        }
+
+        InputDelay = msg->InputDelay;
+        Stage.store(Stage_Syncing);
+
+        MsgSyncReady ready;
+        ready.Type = Msg_SyncReady;
+        Transport.SendTo(peerIdx, &ready, sizeof(ready), Chan_Control, true);
         break;
     }
 
@@ -547,24 +697,36 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
     {
         if (len < sizeof(MsgSessionAccept)) break;
         const MsgSessionAccept* msg = (const MsgSessionAccept*)data;
+        LocalPlayerID = msg->PlayerID;
+        MuteNonLocalInstances();
         Log(LogLevel::Info, "Netplay: session accepted, assigned player ID %d\n", msg->PlayerID);
         break;
     }
 
     case Msg_BlobStart:
+    {
+        if (len < sizeof(MsgBlobStart)) break;
+        // Only BlobStart/BlobEnd carry the type, so latch it here and send the
+        // chunks in between to the same receiver.
+        CurBlobIdx = ((const MsgBlobStart*)data)->BlobType;
+        if (CurBlobIdx < 0 || CurBlobIdx >= Blob_MAX) { CurBlobIdx = -1; break; }
+        BlobRecv[CurBlobIdx].OnMessage(data, len);
+        break;
+    }
+
     case Msg_BlobChunk:
+    {
+        if (CurBlobIdx < 0) break;
+        BlobRecv[CurBlobIdx].OnMessage(data, len);
+        break;
+    }
+
     case Msg_BlobEnd:
     {
-        // Route to appropriate blob receiver based on blob type
-        for (int i = 0; i < Blob_MAX; i++)
-        {
-            if (BlobRecv[i].OnMessage(data, len))
-            {
-                // Blob complete
-                Log(LogLevel::Info, "Netplay: blob %d received\n", i);
-                break;
-            }
-        }
+        if (CurBlobIdx < 0) break;
+        if (BlobRecv[CurBlobIdx].OnMessage(data, len))
+            Log(LogLevel::Info, "Netplay: blob %d received\n", CurBlobIdx);
+        CurBlobIdx = -1;
         break;
     }
 
@@ -578,10 +740,40 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
     {
         if (len < sizeof(MsgStartGame)) break;
         const MsgStartGame* msg = (const MsgStartGame*)data;
+
+        // Every savestate arrived ahead of this on the reliable channel.
+        if (!ClientReceiveStates())
+        {
+            Log(LogLevel::Error, "Netplay: state sync incomplete, cannot start\n");
+            Stage.store(Stage_Idle);
+            if (OnDisconnect) OnDisconnect(0, Disconnect_Error);
+            break;
+        }
+
         CurrentFrame = msg->Frame;
         InputDelay = msg->InputDelay;
+
+        // Both sides owe each other the first InputDelay frames of input, and
+        // neither has sent any yet -- seed them as neutral so frame 0 can run.
+        {
+            std::lock_guard<std::mutex> lock(InputMutex);
+            for (int p = 0; p < NumInstances; p++)
+            {
+                for (u32 f = CurrentFrame; f < CurrentFrame + InputDelay; f++)
+                {
+                    u32 idx = f % INPUT_BUF_SIZE;
+                    InputFrame neutral = {};
+                    neutral.FrameNum = f;
+                    neutral.KeyMask = 0xFFF;
+                    InputBuf[p][idx] = neutral;
+                    InputReady[p][idx] = true;
+                }
+            }
+        }
+
         Log(LogLevel::Info, "Netplay: starting game at frame %d with delay %d\n",
             msg->Frame, msg->InputDelay);
+        Stage.store(Stage_Running);
         break;
     }
 

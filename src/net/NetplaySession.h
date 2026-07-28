@@ -100,6 +100,19 @@ public:
     // Load ROM into all instances
     bool LoadROM(std::unique_ptr<NDSCart::CartCommon> cart);
 
+    // Give the session its own copy of the ROM and boot every mirror instance
+    // from it. Required: without a cart the instances run nothing.
+    bool LoadROMData(const u8* romdata, u32 romlen);
+    u64 GetROMHash() const { return ROMHash; }
+
+    // ---- Session lifecycle ----
+    // Idle    -- transport up, no peer synced yet
+    // Syncing -- handshake / savestate transfer in flight, do NOT run frames
+    // Running -- every instance holds identical state, frames may advance
+    enum SyncStage { Stage_Idle = 0, Stage_Syncing, Stage_Running };
+    int GetStage() const { return Stage.load(); }
+    bool IsRunning() const { return Stage.load() == Stage_Running; }
+
     // State transfer (for client joining)
     bool TakeState(int inst, std::vector<u8>& out);
     bool LoadState(int inst, const void* data, u32 len);
@@ -196,7 +209,7 @@ private:
     static constexpr int INPUT_BUF_SIZE = 256;
     InputFrame InputBuf[kNetplayMaxPlayers][INPUT_BUF_SIZE] = {};
     bool InputReady[kNetplayMaxPlayers][INPUT_BUF_SIZE] = {};
-    std::mutex InputMutex;
+    mutable std::mutex InputMutex;
     int InputDelay = 4;
 
     // ---- Frame state ----
@@ -224,6 +237,20 @@ private:
     // ---- Network ----
     NetplayTransport Transport;
     BlobTransfer BlobRecv[Blob_MAX];
+
+    std::atomic<int> Stage{Stage_Idle};
+    std::vector<u8> ROMData;
+    u64 ROMHash = 0;
+    int PendingSyncPeer = -1;   // host: peer waiting to be sent the session state
+    int CurBlobIdx = -1;        // which BlobRecv the in-flight chunks belong to
+
+    // Kept so the client can rebuild its instances once the host tells it how
+    // many players the session actually has.
+    NDSArgsBuilder ArgsBuilder;
+    void* OrigUserdata = nullptr;
+    bool RebuildInstances(int numPlayers);
+    void DestroyInstances();
+    void HostSyncPeer(int peerIdx);
 
     void HandleControlMessage(int peerIdx, const u8* data, u32 len);
     void HandleInputMessage(int peerIdx, const u8* data, u32 len);

@@ -45,6 +45,11 @@
 namespace melonDS
 {
 
+// Ask the router (UPnP-IGD) to forward a UDP port and report the global IP it
+// answers with. Used by both LAN mode and netplay.
+bool UPnPForward(int port, std::string& externalAddr);
+void UPnPRemove(int port);
+
 class LAN : public MPInterface
 {
 public:

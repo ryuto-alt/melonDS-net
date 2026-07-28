@@ -256,6 +256,15 @@ void EmuThread::run()
             // process input and hotkeys
             NetplaySession* netplaySession = emuInstance->getNetplaySession();
 
+            if (netplaySession && netplaySession->IsActive() && !netplaySession->IsRunning())
+            {
+                // Handshake / savestate transfer still in flight. Advancing a
+                // frame here would desync us from the peer before we even start.
+                netplaySession->ProcessNetwork();
+                std::this_thread::sleep_for(std::chrono::milliseconds(4));
+                continue;
+            }
+
             if (netplaySession && netplaySession->IsActive())
             {
                 // Netplay mode: capture input, send over network, run all instances
@@ -275,12 +284,17 @@ void EmuThread::run()
                 netplaySession->SendLocalInput(localInput);
                 netplaySession->ProcessNetwork();
 
-                // Wait until all player inputs are available for this frame
+                // Wait until all player inputs are available for this frame.
+                // Bail out if the session dies, otherwise this spins forever.
                 while (!netplaySession->ReadyForFrame(netplaySession->GetFrameNum()))
                 {
+                    if (!netplaySession->IsRunning()) break;
                     netplaySession->ProcessNetwork();
-                    std::this_thread::yield();
+                    std::this_thread::sleep_for(std::chrono::microseconds(200));
                 }
+
+                if (!netplaySession->IsRunning())
+                    continue;
             }
             else
             {

@@ -22,7 +22,10 @@
 
 #include <QStandardItemModel>
 #include <QMessageBox>
+#include <QGuiApplication>
+#include <QClipboard>
 
+#include "LAN.h"
 #include "NDS.h"
 #include "NDSCart.h"
 #include "main.h"
@@ -99,6 +102,25 @@ void NetplayStartHostDialog::done(int r)
             return;
         }
 
+        // Open the port and hand the user something they can paste to a friend
+        // on another network.
+        std::string extaddr;
+        if (UPnPForward(port, extaddr) && !extaddr.empty())
+        {
+            QString target = QString("%0:%1").arg(QString::fromStdString(extaddr)).arg(port);
+            QGuiApplication::clipboard()->setText(target);
+            QMessageBox::information(this, "melonDS",
+                QString("インターネット越しの接続先:\n\n    %0\n\n"
+                        "クリップボードにコピーしました。\n"
+                        "相手は同じROMを読み込んでから「Mirror Netplay Join」に貼り付けてください。").arg(target));
+        }
+        else
+        {
+            QMessageBox::warning(this, "melonDS",
+                QString("UPnPポート開放に失敗しました。\n"
+                        "同じLAN内でなら遊べますが、インターネット越しには %0/UDP の手動開放が必要です。").arg(port));
+        }
+
         // Save settings
         auto& cfg = inst->getGlobalConfig();
         cfg.SetString("Netplay.PlayerName", player);
@@ -142,8 +164,24 @@ void NetplayStartClientDialog::done(int r)
     if (r == QDialog::Accepted)
     {
         std::string player = ui->txtPlayerName->text().toStdString();
-        std::string host = ui->txtIPAddress->text().toStdString();
+        QString hostStr = ui->txtIPAddress->text().trimmed();
         int port = ui->txtPort->text().toInt();
+
+        // Let the host's "IP:port" be pasted straight in.
+        int colon = hostStr.lastIndexOf(':');
+        if (colon > 0 && !hostStr.contains('['))
+        {
+            bool ok = false;
+            int p = hostStr.mid(colon+1).toInt(&ok);
+            if (ok && p >= 1024 && p <= 65535)
+            {
+                port = p;
+                hostStr = hostStr.left(colon);
+                ui->txtIPAddress->setText(hostStr);
+                ui->txtPort->setText(QString::number(port));
+            }
+        }
+        std::string host = hostStr.toStdString();
 
         if (player.empty() || host.empty())
         {

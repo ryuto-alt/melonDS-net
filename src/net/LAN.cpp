@@ -950,7 +950,6 @@ void LAN::Process()
 
         Platform::Mutex_Lock(PlayersMutex);
 
-        u32 maxrtt = 0;
         for (int i = 0; i < 16; i++)
         {
             if (Players[i].Status == Player_None) continue;
@@ -958,18 +957,9 @@ void LAN::Process()
             if (!RemotePeers[i]) continue;
 
             Players[i].Ping = RemotePeers[i]->roundTripTime;
-            if (Players[i].Ping > maxrtt) maxrtt = Players[i].Ping;
         }
 
         Platform::Mutex_Unlock(PlayersMutex);
-
-        // 同じLANならRTTは1ms未満だが、別のWi-Fi/インターネット越しだと10ms以上かかる。
-        // 返信待ちを実測RTTに追従させないと全部タイムアウトして通信が成立しない
-        // ponytail: 上限100ms。これを超える回線は待たせても実用にならない
-        int timeout = (int)maxrtt + 10;
-        if (timeout < 10) timeout = 10;
-        if (timeout > 100) timeout = 100;
-        MPRecvTimeout = timeout;
     }
 }
 
@@ -1174,6 +1164,18 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 
 bool LAN::UPnPForwardPort(int port)
 {
+    bool ok = UPnPForward(port, ExternalAddr);
+    UPnPActive = ok;
+    return ok;
+}
+
+void LAN::UPnPRemoveForward(int port)
+{
+    UPnPRemove(port);
+}
+
+bool UPnPForward(int port, std::string& externalAddr)
+{
     int error = 0;
     UPNPDev* devlist = upnpDiscover(2000, nullptr, nullptr, 0, 0, 2, &error);
     if (!devlist)
@@ -1219,23 +1221,22 @@ bool LAN::UPnPForwardPort(int port)
     Platform::Log(Platform::LogLevel::Info, "LAN: UPnP port %d forwarded to %s:%d\n", port, lanaddr, port);
 
     // 相手に伝えるグローバルIP。GetValidIGDが埋めてくれない実装もあるので個別に問い合わせる
-    ExternalAddr = wanaddr;
-    if (ExternalAddr.empty())
+    externalAddr = wanaddr;
+    if (externalAddr.empty())
     {
         char extip[64];
         memset(extip, 0, sizeof(extip));
         if (UPNP_GetExternalIPAddress(urls.controlURL, data.first.servicetype, extip) == UPNPCOMMAND_SUCCESS)
-            ExternalAddr = extip;
+            externalAddr = extip;
     }
-    Platform::Log(Platform::LogLevel::Info, "LAN: external address: %s\n", ExternalAddr.c_str());
+    Platform::Log(Platform::LogLevel::Info, "LAN: external address: %s\n", externalAddr.c_str());
 
-    UPnPActive = true;
     FreeUPNPUrls(&urls);
     freeUPNPDevlist(devlist);
     return true;
 }
 
-void LAN::UPnPRemoveForward(int port)
+void UPnPRemove(int port)
 {
     int error = 0;
     UPNPDev* devlist = upnpDiscover(2000, nullptr, nullptr, 0, 0, 2, &error);

@@ -869,6 +869,22 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
         return false;
     }
 
+    // The mirror instances start out with no cart -- give every one of them the
+    // ROM that's currently running, or they boot into nothing.
+    const NDSCart::CartCommon* cart = nds->GetNDSCart();
+    if (!cart || !cart->GetROM() || cart->GetROMLength() == 0)
+    {
+        Platform::Log(Platform::LogLevel::Error, "Netplay: no ROM loaded\n");
+        netplaySession.reset();
+        return false;
+    }
+
+    if (!netplaySession->LoadROMData(cart->GetROM(), cart->GetROMLength()))
+    {
+        netplaySession.reset();
+        return false;
+    }
+
     return true;
 }
 

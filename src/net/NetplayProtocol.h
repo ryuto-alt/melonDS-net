@@ -241,7 +241,9 @@ private:
 
     EventCallback OnEvent;
 
-    std::mutex ENetMutex;
+    // Poll() holds this while it runs the packet callback, and handlers reply
+    // from inside that callback -- a plain mutex self-deadlocks there.
+    std::recursive_mutex ENetMutex;
 };
 
 // ---- Blob sender/receiver ----

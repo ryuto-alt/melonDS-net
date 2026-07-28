@@ -59,7 +59,7 @@ NetplayTransport::~NetplayTransport()
 
 bool NetplayTransport::StartHost(int port, int maxClients)
 {
-    std::lock_guard<std::mutex> lock(ENetMutex);
+    std::lock_guard<std::recursive_mutex> lock(ENetMutex);
 
     if (enet_initialize() != 0)
     {
@@ -89,7 +89,7 @@ bool NetplayTransport::StartHost(int port, int maxClients)
 
 bool NetplayTransport::StartClient(const char* host, int port, int timeoutMs)
 {
-    std::lock_guard<std::mutex> lock(ENetMutex);
+    std::lock_guard<std::recursive_mutex> lock(ENetMutex);
 
     if (enet_initialize() != 0)
     {
@@ -143,7 +143,7 @@ bool NetplayTransport::StartClient(const char* host, int port, int timeoutMs)
 
 void NetplayTransport::Stop()
 {
-    std::lock_guard<std::mutex> lock(ENetMutex);
+    std::lock_guard<std::recursive_mutex> lock(ENetMutex);
 
     if (!Host) return;
 
@@ -170,7 +170,7 @@ void NetplayTransport::Stop()
 
 void NetplayTransport::SendTo(int peerIdx, const void* data, u32 len, int channel, bool reliable)
 {
-    std::lock_guard<std::mutex> lock(ENetMutex);
+    std::lock_guard<std::recursive_mutex> lock(ENetMutex);
 
     if (!Host || peerIdx < 0 || peerIdx >= NumPeers || !Peers[peerIdx])
         return;
@@ -182,7 +182,7 @@ void NetplayTransport::SendTo(int peerIdx, const void* data, u32 len, int channe
 
 void NetplayTransport::Broadcast(const void* data, u32 len, int channel, bool reliable)
 {
-    std::lock_guard<std::mutex> lock(ENetMutex);
+    std::lock_guard<std::recursive_mutex> lock(ENetMutex);
 
     if (!Host) return;
 
@@ -193,7 +193,7 @@ void NetplayTransport::Broadcast(const void* data, u32 len, int channel, bool re
 
 int NetplayTransport::Poll(const PacketCallback& callback, int timeoutMs)
 {
-    std::lock_guard<std::mutex> lock(ENetMutex);
+    std::lock_guard<std::recursive_mutex> lock(ENetMutex);
 
     if (!Host) return 0;
 
