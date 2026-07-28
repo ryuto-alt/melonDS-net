@@ -248,11 +248,22 @@ bool NetplaySession::LoadROMData(const u8* romdata, u32 romlen)
         Instances[i]->SetNDSCart(std::move(cart));
         Instances[i]->Reset();
 
-        if (Instances[i]->NeedsDirectBoot())
-            Instances[i]->SetupDirectBoot("");
+        // Boot straight into the game. With real BIOS and firmware installed
+        // NeedsDirectBoot() is false, so this console would otherwise sit in
+        // the DS menu -- and in download play it is the one that has to be
+        // running the game for the others to pull it off.
+        Instances[i]->SetupDirectBoot("");
     }
 
-    Log(LogLevel::Info, "Netplay: ROM (%u bytes, hash %016llX) loaded, %d instances, download play %s\n",
+    // Reset() leaves a console halted. Without Start() the CPUs never execute:
+    // RunFrame falls straight out of `while (Running)` and returns a full
+    // scanline count, so frames tick up at full speed while the picture never
+    // changes and no wireless packet is ever sent. The frontend only ever
+    // starts its own console, so the mirrors have to be started here.
+    for (int i = 0; i < NumInstances; i++)
+        Instances[i]->Start();
+
+    Log(LogLevel::Info, "Netplay: ROM (%u bytes, hash %016llX) loaded and started, %d instances, download play %s\n",
         romlen, (unsigned long long)ROMHash, NumInstances, DownloadPlay ? "on" : "off");
     return true;
 }
