@@ -83,6 +83,12 @@ enum NetplayBlobType : u8
     // own firmware, so the friend only needs melonDS and an address.
     Blob_CartROM = 5,
     Blob_Firmware = 6,
+    // The BIOS has to be shipped too: it is not part of a savestate, and the
+    // ARM7 idles *inside* the BIOS (IntrWait) whenever the DS menu or a game
+    // is waiting -- resuming the host's savestate on top of different BIOS
+    // bytes derails the CPU on the spot (undefined instruction, dead console).
+    Blob_BIOS9 = 7,
+    Blob_BIOS7 = 8,
     Blob_MAX,
 };
 

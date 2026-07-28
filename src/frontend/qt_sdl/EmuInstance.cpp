@@ -846,7 +846,8 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
     }
 
     // Build NDS instances using current config
-    auto argsBuilder = [this](int instIdx, const std::vector<u8>& fwdata) -> NDSArgs {
+    auto argsBuilder = [this](int instIdx, const std::vector<u8>& fwdata,
+                              const std::vector<u8>& b9data, const std::vector<u8>& b7data) -> NDSArgs {
         // Lockstep needs every machine byte-identical, and the firmware is NOT
         // part of a savestate (see FirmwareMem::DoSavestate), so the handshake
         // can't repair a mismatch afterwards. The host's firmware is shipped to
@@ -854,6 +855,34 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
         // holds the DS menu the guest consoles boot into.
         Firmware fw = fwdata.empty() ? Firmware {0}
                                      : Firmware {fwdata.data(), (u32)fwdata.size()};
+
+        // Same story for the BIOS: it is skipped by savestates, yet the saved
+        // ARM7 typically sits *inside* it (IntrWait idle loop). A guest whose
+        // local BIOS differs from the host's (e.g. FreeBIOS vs a real dump)
+        // would resume the host's savestate on top of foreign code and crash
+        // the mirror console on the spot -- frozen picture, dead input. So
+        // every machine runs the host's BIOS bytes.
+        std::unique_ptr<ARM9BIOSImage> bios9;
+        if (b9data.empty())
+            bios9 = loadARM9BIOS();
+        else
+        {
+            bios9 = std::make_unique<ARM9BIOSImage>();
+            bios9->fill(0);
+            memcpy(bios9->data(), b9data.data(),
+                   b9data.size() < bios9->size() ? b9data.size() : bios9->size());
+        }
+
+        std::unique_ptr<ARM7BIOSImage> bios7;
+        if (b7data.empty())
+            bios7 = loadARM7BIOS();
+        else
+        {
+            bios7 = std::make_unique<ARM7BIOSImage>();
+            bios7->fill(0);
+            memcpy(bios7->data(), b7data.data(),
+                   b7data.size() < bios7->size() ? b7data.size() : bios7->size());
+        }
 
         // Each mirror instance still needs a distinct MAC, or the emulated DSes
         // can't tell each other apart over the local wireless.
@@ -869,8 +898,8 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
         fw.UpdateChecksums();
 
         NDSArgs args {
-            loadARM9BIOS(),
-            loadARM7BIOS(),
+            std::move(bios9),
+            std::move(bios7),
             std::move(fw),
         };
 
@@ -910,6 +939,16 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
     {
         netplaySession->SetSharedData(fw->Buffer(), fw->Length());
         realFirmware = globalCfg.GetBool("Emu.ExternalBIOSEnable");
+    }
+
+    // The BIOS travels with the firmware: savestates skip it, but the saved
+    // ARM7 state resumes inside it, so every machine must run these exact
+    // bytes (real dump or FreeBIOS alike -- identical is what matters).
+    if (auto b9 = loadARM9BIOS())
+    {
+        if (auto b7 = loadARM7BIOS())
+            netplaySession->SetSharedBIOS(b9->data(), (u32)b9->size(),
+                                          b7->data(), (u32)b7->size());
     }
 
     if (!realFirmware)

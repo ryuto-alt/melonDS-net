@@ -134,7 +134,7 @@ bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder, void* or
 
     for (int i = 0; i < NumInstances; i++)
     {
-        NDSArgs args = argsBuilder(i, FirmwareData);
+        NDSArgs args = argsBuilder(i, FirmwareData, BIOS9Data, BIOS7Data);
 
         // Each instance gets a NetplayInstanceData as userdata
         // so that Platform::MP_* callbacks can route to the correct LocalMP instance
@@ -229,6 +229,19 @@ void NetplaySession::SetSharedData(const u8* firmware, u32 fwlen)
         FirmwareData.assign(firmware, firmware + fwlen);
     else
         FirmwareData.clear();
+}
+
+void NetplaySession::SetSharedBIOS(const u8* bios9, u32 len9, const u8* bios7, u32 len7)
+{
+    if (bios9 && len9)
+        BIOS9Data.assign(bios9, bios9 + len9);
+    else
+        BIOS9Data.clear();
+
+    if (bios7 && len7)
+        BIOS7Data.assign(bios7, bios7 + len7);
+    else
+        BIOS7Data.clear();
 }
 
 bool NetplaySession::LoadROMData(const u8* romdata, u32 romlen)
@@ -478,7 +491,14 @@ void NetplaySession::ApplyInput(int instIdx, u32 frame)
     else
         Instances[instIdx]->ReleaseScreen();
 
-    Instances[instIdx]->SetLidClosed(input.LidClosed != 0);
+    // Only on change: SetLidClosed(false) raises IRQ_LidOpen on the ARM7
+    // every time it is called. Calling it unconditionally every frame storms
+    // the firmware with 60 wake-up interrupts a second, which wedges the real
+    // DS menu solid (frozen clock, dead input) on every mirror console.
+    // The normal frontend only calls this when the lid hotkey toggles.
+    bool lid = (input.LidClosed != 0);
+    if (lid != Instances[instIdx]->IsLidClosed())
+        Instances[instIdx]->SetLidClosed(lid);
 }
 
 // ---- Threading ----
@@ -621,9 +641,13 @@ u32 NetplaySession::RunFrame()
     {
         u32 mp = LMP.GetTrafficCount();
         Log(LogLevel::Info,
-            "Netplay: frame %u | last frame %u ms | MP packets since last report: %u | scanlines %u/%u\n",
+            "Netplay: frame %u | last frame %u ms | MP packets since last report: %u | scanlines %u/%u | h0 %016llX@%u h1 %016llX@%u\n",
             CurrentFrame, LastFrameMS, mp - LastMPTraffic,
-            InstanceScanlines[0], InstanceScanlines[NumInstances > 1 ? 1 : 0]);
+            InstanceScanlines[0], InstanceScanlines[NumInstances > 1 ? 1 : 0],
+            (unsigned long long)InstanceHash[0].load(std::memory_order_relaxed),
+            InstanceHashFrame[0].load(std::memory_order_relaxed),
+            (unsigned long long)InstanceHash[NumInstances > 1 ? 1 : 0].load(std::memory_order_relaxed),
+            InstanceHashFrame[NumInstances > 1 ? 1 : 0].load(std::memory_order_relaxed));
         LastMPTraffic = mp;
     }
 
@@ -814,10 +838,17 @@ void NetplaySession::HostSyncPeer(int peerIdx)
     accept.PlayerID = (u8)playerID;
     Transport.SendTo(peerIdx, &accept, sizeof(accept), Chan_Control, true);
 
-    // The joining player brings nothing but melonDS. Ship it the firmware every
-    // machine must agree on, then the cart itself.
+    // The joining player brings nothing but melonDS. Ship it the firmware and
+    // BIOS every machine must agree on, then the cart itself. The cart goes
+    // last: its arrival is what triggers the client's instance build, so
+    // everything the build consumes has to be there first.
     if (!FirmwareData.empty())
         BlobTransfer::Send(Transport, peerIdx, Blob_Firmware, FirmwareData.data(), (u32)FirmwareData.size());
+
+    if (!BIOS9Data.empty())
+        BlobTransfer::Send(Transport, peerIdx, Blob_BIOS9, BIOS9Data.data(), (u32)BIOS9Data.size());
+    if (!BIOS7Data.empty())
+        BlobTransfer::Send(Transport, peerIdx, Blob_BIOS7, BIOS7Data.data(), (u32)BIOS7Data.size());
 
     BlobTransfer::Send(Transport, peerIdx, Blob_CartROM, ROMData.data(), (u32)ROMData.size());
 
@@ -975,6 +1006,16 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
                 const auto& fw = BlobRecv[Blob_Firmware].GetData();
                 SetSharedData(fw.data(), (u32)fw.size());
                 BlobRecv[Blob_Firmware].Reset();
+            }
+            else if (CurBlobIdx == Blob_BIOS9)
+            {
+                BIOS9Data = BlobRecv[Blob_BIOS9].GetData();
+                BlobRecv[Blob_BIOS9].Reset();
+            }
+            else if (CurBlobIdx == Blob_BIOS7)
+            {
+                BIOS7Data = BlobRecv[Blob_BIOS7].GetData();
+                BlobRecv[Blob_BIOS7].Reset();
             }
             else if (CurBlobIdx == Blob_CartROM)
             {
@@ -1162,10 +1203,44 @@ void NetplaySession::HandleInputMessage(int peerIdx, const u8* data, u32 len)
 
 // ---- State sync ----
 
+// Cartless download-play mirrors (the guest consoles sitting in the DS menu)
+// do NOT get their state transferred on join. Resuming the firmware menu from
+// a savestate reliably wedges it on the machine that loads it cold (the ARM7
+// ends up spinning with IRQs masked in CPSR, every enabled interrupt stays
+// pending, the menu freezes and ignores all input) -- while the game console's
+// state transfers perfectly. There is nothing worth preserving on them anyway:
+// until the joining player acts, they only ever received neutral input. So on
+// every join, BOTH sides put them through the same reset ritual and let them
+// boot the menu in lockstep from emulated time zero.
+void NetplaySession::ResetCartlessInstance(int i)
+{
+    if (!Instances[i]) return;
+
+    Instances[i]->Reset();
+    // Same fixed RTC as CreateInstances: byte-identical on every machine, and
+    // the cleared power-lost flag keeps the firmware out of the setup wizard.
+    Instances[i]->RTC.SetDateTime(2000, 1, 1, 0, 0, 0);
+    Instances[i]->Start();
+}
+
+bool NetplaySession::IsStateTransferInstance(int i) const
+{
+    // Download play: only instance 0 owns the cart; the cartless menu consoles
+    // are reset on join instead of savestated.
+    return !(DownloadPlay && i != 0);
+}
+
 bool NetplaySession::HostSendStates(int clientIdx)
 {
     for (int i = 0; i < NumInstances; i++)
     {
+        if (!IsStateTransferInstance(i))
+        {
+            ResetCartlessInstance(i);
+            Log(LogLevel::Info, "Netplay: instance %d is cartless, reset for lockstep boot instead of state transfer\n", i);
+            continue;
+        }
+
         std::vector<u8> stateData;
         if (!TakeState(i, stateData))
         {
@@ -1175,6 +1250,19 @@ bool NetplaySession::HostSendStates(int clientIdx)
 
         NetplayBlobType blobType = (NetplayBlobType)(Blob_Savestate0 + i);
         BlobTransfer::Send(Transport, clientIdx, blobType, stateData.data(), (u32)stateData.size());
+
+        // Resume from the exact bytes we just shipped. Loading a savestate is
+        // not perfectly round-trip identical to having kept running (verified:
+        // the cartless firmware-menu console diverges within a frame of the
+        // client loading it, while the host continues from live state). The
+        // cure is symmetry: whatever quirks the load path has, every machine
+        // must experience the same ones -- so the host reloads its own states
+        // and both sides evolve from identical footing.
+        if (!LoadState(i, stateData.data(), (u32)stateData.size()))
+        {
+            Log(LogLevel::Error, "Netplay: failed to reload own state for instance %d\n", i);
+            return false;
+        }
     }
 
     // Also send SRAM for instance 0
@@ -1194,6 +1282,9 @@ bool NetplaySession::ClientReceiveStates()
     // This is called in a polling loop
     for (int i = 0; i < NumInstances; i++)
     {
+        if (!IsStateTransferInstance(i))
+            continue; // reset on join, no state expected
+
         int blobIdx = Blob_Savestate0 + i;
         if (blobIdx >= Blob_MAX) break;
 
@@ -1204,6 +1295,15 @@ bool NetplaySession::ClientReceiveStates()
     // All states received - apply them
     for (int i = 0; i < NumInstances; i++)
     {
+        if (!IsStateTransferInstance(i))
+        {
+            // Mirror of the host's join-time ritual, so both sides boot the
+            // menu console in lockstep from emulated time zero.
+            ResetCartlessInstance(i);
+            Log(LogLevel::Info, "Netplay: instance %d is cartless, reset for lockstep boot\n", i);
+            continue;
+        }
+
         int blobIdx = Blob_Savestate0 + i;
         if (blobIdx >= Blob_MAX) break;
 

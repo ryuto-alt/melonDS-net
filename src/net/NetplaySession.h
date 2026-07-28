@@ -94,10 +94,11 @@ public:
 
     // ROM must be loaded before starting.
     // Creates NDS instances internally using the provided args builder.
-    // Takes the mirror instance index and the firmware image every machine in
-    // the session must share (empty = build a default one). Each instance still
-    // needs its own MAC address.
-    using NDSArgsBuilder = std::function<NDSArgs(int instIdx, const std::vector<u8>& firmware)>;
+    // Takes the mirror instance index and the firmware/BIOS images every
+    // machine in the session must share (empty = load local ones). Each
+    // instance still needs its own MAC address.
+    using NDSArgsBuilder = std::function<NDSArgs(int instIdx, const std::vector<u8>& firmware,
+                                                 const std::vector<u8>& bios9, const std::vector<u8>& bios7)>;
     bool CreateInstances(const NDSArgsBuilder& argsBuilder, void* origUserdata = nullptr);
 
     // Load ROM into all instances
@@ -111,6 +112,11 @@ public:
 
     // Host only: the cart and firmware bytes handed to joining players.
     void SetSharedData(const u8* firmware, u32 fwlen);
+
+    // Host only: the BIOS images every machine must run. Not covered by the
+    // savestates (the BIOS is skipped there), yet the saved ARM7 state resumes
+    // inside it -- so all machines need byte-identical images.
+    void SetSharedBIOS(const u8* bios9, u32 len9, const u8* bios7, u32 len7);
     void SetDownloadPlay(bool enable) { DownloadPlay = enable; }
     bool IsDownloadPlay() const { return DownloadPlay; }
 
@@ -289,6 +295,8 @@ private:
     std::atomic<int> Stage{Stage_Idle};
     std::vector<u8> ROMData;
     std::vector<u8> FirmwareData;   // shared by every machine, or empty for generated
+    std::vector<u8> BIOS9Data;      // shared by every machine, or empty for local default
+    std::vector<u8> BIOS7Data;
     u64 ROMHash = 0;
     bool DownloadPlay = true;
     int OfferedPlayers = 2;     // player count the host announced
@@ -303,6 +311,12 @@ private:
     bool RebuildInstances(int numPlayers);
     void DestroyInstances();
     void HostSyncPeer(int peerIdx);
+
+    // Cartless download-play mirrors are reset on join (on every machine, the
+    // same way) instead of having their state transferred: the DS-menu console
+    // does not survive resuming from a savestate on the machine that loads it.
+    void ResetCartlessInstance(int i);
+    bool IsStateTransferInstance(int i) const;
 
     // Host: park every mirror console on one common frame (the first frame
     // whose input set is incomplete), stop the instance threads, and make that

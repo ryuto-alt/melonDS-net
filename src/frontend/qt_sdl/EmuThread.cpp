@@ -155,6 +155,10 @@ void EmuThread::run()
     // Last netplay stage an OSD wait message was shown for (-1 = none)
     int netplayWaitStage = -1;
 
+    // Netplay lid state: HK_Lid toggles it, and the *state* travels in every
+    // input frame (ApplyInput only forwards changes to the console).
+    bool netplayLidClosed = false;
+
     while (emuStatus != emuStatus_Exit)
     {
         if (emuInstance->instanceID == 0)
@@ -339,11 +343,11 @@ void EmuThread::run()
                 localInput.Touching = emuInstance->isTouching ? 1 : 0;
                 localInput.TouchX = emuInstance->touchX;
                 localInput.TouchY = emuInstance->touchY;
-                localInput.LidClosed = 0;
                 localInput.Checksum = 0;
 
                 if (emuInstance->hotkeyPressed(HK_Lid))
-                    localInput.LidClosed = 1;
+                    netplayLidClosed = !netplayLidClosed;
+                localInput.LidClosed = netplayLidClosed ? 1 : 0;
 
                 netplaySession->SetLocalInput(localInput);
 
