@@ -157,6 +157,17 @@ bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder, void* or
 
         Instances[i]->Reset();
 
+        // The frontend clears the RTC's power-lost flag (StatusReg1 bit7) on
+        // its own console via setDateTime(), but the mirror consoles never get
+        // that: their clock sits at 2000-01-01 with the "battery died" flag
+        // raised. A real-firmware boot (download play guest consoles) sees the
+        // flag and drops into the first-boot "adjust system settings" wizard
+        // instead of the DS menu. Clear it with a fixed date -- it must NOT be
+        // the wall clock, because every peer runs this line at a different
+        // moment and the RTC state has to stay byte-identical across machines.
+        // (Late joiners overwrite this with the host's RTC via savestate.)
+        Instances[i]->RTC.SetDateTime(2000, 1, 1, 0, 0, 0);
+
         // Register this instance with LocalMP
         LMP.Begin(i);
     }
