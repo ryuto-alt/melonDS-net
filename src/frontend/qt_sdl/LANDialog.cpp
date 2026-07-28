@@ -24,6 +24,8 @@
 #include <QStandardItemModel>
 #include <QPushButton>
 #include <QMessageBox>
+#include <QGuiApplication>
+#include <QClipboard>
 
 #include "LANDialog.h"
 #include "Config.h"
@@ -101,6 +103,19 @@ void LANStartHostDialog::done(int r)
             {
                 QMessageBox::warning(this, "melonDS",
                     "UPnPポート開放に失敗しました。\nルーターがUPnPに対応していないか、無効になっている可能性があります。\n手動でポートを開放してください。");
+            }
+            else
+            {
+                QString addr = QString::fromStdString(lan().GetExternalAddr());
+                if (!addr.isEmpty())
+                {
+                    QString target = QString("%0:%1").arg(addr).arg(port);
+                    QGuiApplication::clipboard()->setText(target);
+                    QMessageBox::information(this, "melonDS",
+                        QString("インターネット越しの接続先:\n\n    %0\n\n"
+                                "クリップボードにコピーしました。\n"
+                                "別のWi-Fiにいる相手は「LANゲームに参加」→ 直接接続 に貼り付けてください。").arg(target));
+                }
             }
         }
 
@@ -197,6 +212,23 @@ void LANStartClientDialog::onDirectConnect()
     }
 
     int port = ui->sbDirectPort->value();
+
+    // ホストが渡す "IP:ポート" をそのまま貼れるようにする
+    // ponytail: IPv6リテラル([::1]:7064)は非対応。ENet側がIPv4のみなので不要
+    int colon = host.lastIndexOf(':');
+    if (colon > 0 && !host.contains('['))
+    {
+        bool ok = false;
+        int p = host.mid(colon+1).toInt(&ok);
+        if (ok && p >= 1024 && p <= 65535)
+        {
+            port = p;
+            host = host.left(colon);
+            ui->txtDirectHost->setText(host);
+            ui->sbDirectPort->setValue(port);
+        }
+    }
+
     std::string hostname = host.toStdString();
     std::string player = ui->txtPlayerName->text().toStdString();
 

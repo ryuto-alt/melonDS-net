@@ -95,6 +95,9 @@ public:
     bool UPnPForwardPort(int port);
     void UPnPRemoveForward(int port);
 
+    // ルーターが報告するグローバルIP。UPnPForwardPort成功後に有効
+    std::string GetExternalAddr() const { return ExternalAddr; }
+
     std::map<u32, DiscoveryData> GetDiscoveryList();
     std::vector<Player> GetPlayerList();
     int GetNumPlayers() { return NumPlayers; }
@@ -144,6 +147,7 @@ private:
 
     int GamePort;
     bool UPnPActive;
+    std::string ExternalAddr;
 
     u32 FrameCount;
 

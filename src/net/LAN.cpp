@@ -950,6 +950,7 @@ void LAN::Process()
 
         Platform::Mutex_Lock(PlayersMutex);
 
+        u32 maxrtt = 0;
         for (int i = 0; i < 16; i++)
         {
             if (Players[i].Status == Player_None) continue;
@@ -957,9 +958,18 @@ void LAN::Process()
             if (!RemotePeers[i]) continue;
 
             Players[i].Ping = RemotePeers[i]->roundTripTime;
+            if (Players[i].Ping > maxrtt) maxrtt = Players[i].Ping;
         }
 
         Platform::Mutex_Unlock(PlayersMutex);
+
+        // 同じLANならRTTは1ms未満だが、別のWi-Fi/インターネット越しだと10ms以上かかる。
+        // 返信待ちを実測RTTに追従させないと全部タイムアウトして通信が成立しない
+        // ponytail: 上限100ms。これを超える回線は待たせても実用にならない
+        int timeout = (int)maxrtt + 10;
+        if (timeout < 10) timeout = 10;
+        if (timeout > 100) timeout = 100;
+        MPRecvTimeout = timeout;
     }
 }
 
@@ -1179,6 +1189,7 @@ bool LAN::UPnPForwardPort(int port)
     memset(&data, 0, sizeof(data));
 
     char wanaddr[64];
+    memset(wanaddr, 0, sizeof(wanaddr));
     int ret = UPNP_GetValidIGD(devlist, &urls, &data, lanaddr, sizeof(lanaddr), wanaddr, sizeof(wanaddr));
     if (ret == 0)
     {
@@ -1206,6 +1217,17 @@ bool LAN::UPnPForwardPort(int port)
     }
 
     Platform::Log(Platform::LogLevel::Info, "LAN: UPnP port %d forwarded to %s:%d\n", port, lanaddr, port);
+
+    // 相手に伝えるグローバルIP。GetValidIGDが埋めてくれない実装もあるので個別に問い合わせる
+    ExternalAddr = wanaddr;
+    if (ExternalAddr.empty())
+    {
+        char extip[64];
+        memset(extip, 0, sizeof(extip));
+        if (UPNP_GetExternalIPAddress(urls.controlURL, data.first.servicetype, extip) == UPNPCOMMAND_SUCCESS)
+            ExternalAddr = extip;
+    }
+    Platform::Log(Platform::LogLevel::Info, "LAN: external address: %s\n", ExternalAddr.c_str());
 
     UPnPActive = true;
     FreeUPNPUrls(&urls);
