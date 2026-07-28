@@ -166,6 +166,16 @@ void EmuInstance::audioCallback(void* data, Uint8* stream, int len)
 
     double skew = std::clamp(inst->targetFPS / INTERNAL_FRAME_RATE, 0.995, 1.005);
     NDS* audioNDS = inst->getDisplayNDS();
+
+    // A netplay guest has no console of its own: if the session was just torn
+    // down (or is not built yet), there is nothing to mix -- output silence
+    // instead of dereferencing null.
+    if (!audioNDS)
+    {
+        memset(stream, 0, len*sizeof(s16)*2);
+        return;
+    }
+
     audioNDS->SPU.SetOutputSkew(skew);
 
     int len_in = inst->audioGetNumSamplesOut(len);

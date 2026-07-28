@@ -150,6 +150,12 @@ public:
     // Check if all inputs are available for the given frame
     bool ReadyForFrame(u32 frameNum) const;
 
+    // Host free-run (Stage_Idle, no peers yet): fill every missing input slot
+    // in [CurrentFrame, CurrentFrame + InputDelay] with neutral input, for
+    // every player. Keeps ReadyForFrame passing while nobody is connected, and
+    // heals the gaps a disconnecting client leaves behind. Emu thread only.
+    void SeedIdleInputs();
+
     // Run one frame on all instances in parallel
     // Returns number of scanlines rendered (from display instance)
     u32 RunFrame();
@@ -179,11 +185,15 @@ public:
     // Host: start listening for clients
     bool HostStart(int port = kNetplayDefaultPort);
 
-    // Client: connect to host
-    bool ClientConnect(const char* host, int port = kNetplayDefaultPort);
+    // Client: connect to host. pollCb runs every ~100ms while waiting so the
+    // caller (UI thread) can keep its event loop alive.
+    bool ClientConnect(const char* host, int port = kNetplayDefaultPort,
+                       int timeoutMs = 5000, const std::function<void()>& pollCb = nullptr);
 
-    // Process network events (call every frame)
-    void ProcessNetwork();
+    // Process network events (call every frame).
+    // timeoutMs > 0 makes the poll block-wait for traffic up to that long --
+    // used by wait loops to service ENet at high frequency without spinning.
+    void ProcessNetwork(int timeoutMs = 0);
 
     // Send local input to all remote players
     void SendLocalInput(const InputFrame& input);
@@ -201,15 +211,29 @@ public:
     bool IsActive() const { return Active.load(); }
     bool IsHost() const { return HostMode; }
 
+    // Live connection state for the UI player list. playerID == local always
+    // reports true; the host answers from its per-peer slots, a client only
+    // knows about its link to the host.
+    bool IsPlayerConnected(int playerID) const;
+
     // Global accessor for Platform callbacks
     static NetplaySession* Current;
     static bool IsNetplayActive() { return Current != nullptr && Current->IsActive(); }
 
-    // Callbacks for UI
+    // Callbacks for UI. Guarded by CallbackMutex: the UI thread (un)sets them
+    // while the emu thread may be invoking them from ProcessNetwork().
     using DesyncCallback = std::function<void(u32 frame, u64 localHash, u64 remoteHash)>;
     using DisconnectCallback = std::function<void(int playerID, NetplayDisconnectReason reason)>;
-    void SetDesyncCallback(const DesyncCallback& cb) { OnDesync = cb; }
-    void SetDisconnectCallback(const DisconnectCallback& cb) { OnDisconnect = cb; }
+    void SetDesyncCallback(const DesyncCallback& cb)
+    {
+        std::lock_guard<std::mutex> lock(CallbackMutex);
+        OnDesync = cb;
+    }
+    void SetDisconnectCallback(const DisconnectCallback& cb)
+    {
+        std::lock_guard<std::mutex> lock(CallbackMutex);
+        OnDisconnect = cb;
+    }
 
     // Access LocalMP for Platform.cpp routing
     LocalMP& GetLocalMP() { return LMP; }
@@ -269,6 +293,7 @@ private:
     bool DownloadPlay = true;
     int OfferedPlayers = 2;     // player count the host announced
     int PendingSyncPeer = -1;   // host: peer waiting to be sent the session state
+    int PendingStartAcks = 0;   // host: clients that got Msg_StartGame but have not acked yet
     int CurBlobIdx = -1;        // which BlobRecv the in-flight chunks belong to
 
     // Kept so the client can rebuild its instances once the host tells it how
@@ -279,12 +304,28 @@ private:
     void DestroyInstances();
     void HostSyncPeer(int peerIdx);
 
+    // Host: park every mirror console on one common frame (the first frame
+    // whose input set is incomplete), stop the instance threads, and make that
+    // frame the session's CurrentFrame. The savestates for a joining peer must
+    // all be taken from this one consistent point. Emu thread only.
+    u32 AlignInstances();
+
+    // Drop the whole input history and seed neutral input for every player for
+    // [startFrame, startFrame + InputDelay). Host and client run this with the
+    // same startFrame during the join handshake so their histories agree.
+    void ResetInputBuffers(u32 startFrame);
+
     void HandleControlMessage(int peerIdx, const u8* data, u32 len);
     void HandleInputMessage(int peerIdx, const u8* data, u32 len);
 
     // ---- Callbacks ----
+    mutable std::mutex CallbackMutex;
     DesyncCallback OnDesync;
     DisconnectCallback OnDisconnect;
+
+    // Invoke the UI callbacks safely (copy under lock, call unlocked).
+    void NotifyDesync(u32 frame, u64 localHash, u64 remoteHash);
+    void NotifyDisconnect(int playerID, NetplayDisconnectReason reason);
 
     // Apply buffered inputs to all instances for the given frame
     void ApplyInput(int instIdx, u32 frame);

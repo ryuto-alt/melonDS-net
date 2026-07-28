@@ -100,9 +100,13 @@ bool NetplaySession::Init(int localPlayerID, int numPlayers, int inputDelay)
 
 void NetplaySession::DeInit()
 {
-    StopThreads();
-
+    // Drop these first: the emu thread's wait loops key off Active/Stage, and
+    // they must be able to bail out before we start joining threads and
+    // deleting the instances they might still be looking at.
     Active.store(false);
+    Stage.store(Stage_Idle);
+
+    StopThreads();
 
     Transport.Stop();
 
@@ -404,6 +408,50 @@ bool NetplaySession::ReadyForFrame(u32 frameNum) const
     return true;
 }
 
+void NetplaySession::SeedIdleInputs()
+{
+    std::lock_guard<std::mutex> lock(InputMutex);
+
+    for (int p = 0; p < NumInstances; p++)
+    {
+        for (u32 f = CurrentFrame; f <= CurrentFrame + (u32)InputDelay; f++)
+        {
+            u32 idx = f % INPUT_BUF_SIZE;
+            if (InputReady[p][idx] && InputBuf[p][idx].FrameNum == f)
+                continue; // keep real input (the local player's, typically)
+
+            InputFrame neutral = {};
+            neutral.FrameNum = f;
+            neutral.KeyMask = 0xFFF;
+            InputBuf[p][idx] = neutral;
+            InputReady[p][idx] = true;
+        }
+    }
+}
+
+void NetplaySession::ResetInputBuffers(u32 startFrame)
+{
+    std::lock_guard<std::mutex> lock(InputMutex);
+
+    // Kill the whole history: stale entries carry frame numbers that match the
+    // frames about to be replayed (the host free-ran through them), and a
+    // leftover real input on one side vs neutral on the other is a desync.
+    memset(InputReady, 0, sizeof(InputReady));
+
+    for (int p = 0; p < NumInstances; p++)
+    {
+        for (u32 f = startFrame; f < startFrame + (u32)InputDelay; f++)
+        {
+            u32 idx = f % INPUT_BUF_SIZE;
+            InputFrame neutral = {};
+            neutral.FrameNum = f;
+            neutral.KeyMask = 0xFFF;
+            InputBuf[p][idx] = neutral;
+            InputReady[p][idx] = true;
+        }
+    }
+}
+
 void NetplaySession::ApplyInput(int instIdx, u32 frame)
 {
     InputFrame input;
@@ -493,6 +541,63 @@ void NetplaySession::StopThreads()
     Log(LogLevel::Info, "Netplay: stopped instance threads\n");
 }
 
+u32 NetplaySession::AlignInstances()
+{
+    // First frame whose input set is incomplete. Inputs are only ever seeded
+    // by the emu thread (which is sitting in this very function) and by
+    // HandleInputMessage (same thread, inside Poll) -- so this cannot move
+    // under us. All players' seeds are written together each frame, which
+    // makes this the one frame every instance thread will stall on.
+    u32 stallFrame = CurrentFrame;
+    while (ReadyForFrame(stallFrame) &&
+           stallFrame < CurrentFrame + (u32)INPUT_BUF_SIZE)
+        stallFrame++;
+
+    if (ThreadsRunning)
+    {
+        // The threads walk themselves there; wait, but never forever.
+        u64 t0 = Platform::GetMSCount();
+        for (;;)
+        {
+            bool all = true;
+            for (int i = 0; i < NumInstances; i++)
+            {
+                if (InstanceFrame[i].load(std::memory_order_acquire) < stallFrame)
+                {
+                    all = false;
+                    break;
+                }
+            }
+            if (all || (Platform::GetMSCount() - t0) > 5000)
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        StopThreads();
+    }
+
+    // Belt and suspenders: run any straggler up to the stall frame ourselves.
+    // MP exchanges against already-parked consoles just hit LocalMP's recv
+    // timeout, so this is slow but bounded -- and normally a no-op.
+    for (int i = 0; i < NumInstances; i++)
+    {
+        while (InstanceFrame[i].load(std::memory_order_relaxed) < stallFrame)
+        {
+            u32 f = InstanceFrame[i].load(std::memory_order_relaxed);
+            if (!ReadyForFrame(f)) break; // cannot happen; never hang here
+            ApplyInput(i, f);
+            InstanceScanlines[i] = Instances[i]->RunFrame();
+            InstanceFrame[i].store(f + 1, std::memory_order_release);
+        }
+    }
+
+    Log(LogLevel::Info, "Netplay: aligned %d instances on frame %u (was %u)\n",
+        NumInstances, stallFrame, CurrentFrame);
+
+    CurrentFrame = stallFrame;
+    return stallFrame;
+}
+
 u32 NetplaySession::RunFrame()
 {
     if (!Active.load() || NumInstances == 0)
@@ -571,6 +676,22 @@ NDS* NetplaySession::GetInstance(int idx) const
     return nullptr;
 }
 
+bool NetplaySession::IsPlayerConnected(int playerID) const
+{
+    if (playerID < 0 || playerID >= NumInstances)
+        return false;
+
+    if (playerID == LocalPlayerID)
+        return true;
+
+    if (HostMode)
+        return playerID >= 1 && Transport.IsPeerConnected(playerID - 1);
+
+    // A client only holds a link to the host; other clients' state is the
+    // host's business.
+    return playerID == 0 && Transport.IsConnected();
+}
+
 // ---- Desync detection ----
 
 u64 NetplaySession::HashInstance(int instIdx) const
@@ -605,7 +726,9 @@ u64 NetplaySession::ComputeStateHash(u32 frame) const
 
 bool NetplaySession::HostStart(int port)
 {
-    if (!Transport.StartHost(port, kNetplayMaxPlayers - 1))
+    // Only accept as many clients as this session has instances for; extra
+    // joiners would have no mirror console and crash on GetDisplayInstance().
+    if (!Transport.StartHost(port, std::max(1, NumInstances - 1)))
         return false;
 
     HostMode = true;
@@ -619,27 +742,42 @@ bool NetplaySession::HostStart(int port)
             PendingSyncPeer = peerIdx;
             Stage.store(Stage_Syncing);
         }
-        else if (OnDisconnect)
+        else
         {
-            OnDisconnect(peerIdx + 1, Disconnect_Normal);
+            // Back to waiting: the frame gate and the input wait loop both key
+            // off Stage, and without this they would spin forever on a peer
+            // that is gone.
+            // Also drop any sync still queued for this peer: if it connected
+            // and dropped within the same Poll(), HostSyncPeer would otherwise
+            // run against the dead slot and bump PendingStartAcks for an ack
+            // that can never arrive -- wedging every future join in
+            // Stage_Syncing.
+            PendingSyncPeer = -1;
+            PendingStartAcks = 0;
+            Stage.store(Stage_Idle);
+            NotifyDisconnect(peerIdx + 1, Disconnect_Normal);
         }
     });
 
     return true;
 }
 
-bool NetplaySession::ClientConnect(const char* host, int port)
+bool NetplaySession::ClientConnect(const char* host, int port, int timeoutMs,
+                                   const std::function<void()>& pollCb)
 {
-    if (!Transport.StartClient(host, port))
+    if (!Transport.StartClient(host, port, timeoutMs, pollCb))
         return false;
 
     HostMode = false;
     Stage.store(Stage_Syncing);
 
     Transport.SetEventCallback([this](int peerIdx, bool connected) {
-        if (!connected && OnDisconnect)
+        if (!connected)
         {
-            OnDisconnect(0, Disconnect_Normal);
+            // Leave the running/syncing stage so the emu thread's wait loops
+            // can exit instead of freezing the app.
+            Stage.store(Stage_Idle);
+            NotifyDisconnect(0, Disconnect_Normal);
         }
     });
 
@@ -672,20 +810,34 @@ void NetplaySession::HostSyncPeer(int peerIdx)
 
     BlobTransfer::Send(Transport, peerIdx, Blob_CartROM, ROMData.data(), (u32)ROMData.size());
 
-    // Savestates are only needed if this session already ran. The host sits at
-    // Stage_Idle until somebody joins, so at frame 0 both sides are a plain
-    // reset of the same cart and firmware -- byte-identical already. Skipping
-    // them here takes ~38MB off the join, which was the bulk of the wait and
-    // long enough for ENet to drop the peer.
+    // Savestates are only needed if this session already ran. At frame 0 both
+    // sides are a plain reset of the same cart and firmware -- byte-identical
+    // already. Skipping them there takes ~38MB off the join. With the host
+    // free-running while it waits, though, the normal case is now frame != 0.
     if (CurrentFrame == 0)
     {
         Log(LogLevel::Info, "Netplay: peer %d joined at frame 0, skipping state transfer\n", peerIdx);
     }
-    else if (!HostSendStates(peerIdx))
+    else
     {
-        Log(LogLevel::Error, "Netplay: failed to send states to peer %d\n", peerIdx);
-        Stage.store(Stage_Idle);
-        return;
+        // Park every mirror console on one common frame first: snapshots taken
+        // at whatever frame each instance happened to be on are a guaranteed
+        // desync. This also stops the instance threads, so the states below
+        // are taken from standing-still consoles.
+        AlignInstances();
+
+        // The joining peer starts its input history fresh at this frame; ours
+        // still holds the free-run inputs for these very frame numbers. Both
+        // sides must agree: neutral input for the first InputDelay frames.
+        // (The client does the same in its Msg_StartGame handler.)
+        ResetInputBuffers(CurrentFrame);
+
+        if (!HostSendStates(peerIdx))
+        {
+            Log(LogLevel::Error, "Netplay: failed to send states to peer %d\n", peerIdx);
+            Stage.store(Stage_Idle);
+            return;
+        }
     }
 
     // Chan_Control is reliable and ordered, so this lands after the last blob.
@@ -698,13 +850,23 @@ void NetplaySession::HostSyncPeer(int peerIdx)
     Log(LogLevel::Info, "Netplay: peer %d synced as player %d at frame %u\n",
         peerIdx, playerID, CurrentFrame);
 
-    Stage.store(Stage_Running);
+    // Do NOT go to Stage_Running yet: the client still has to receive all of
+    // that, apply it and build its consoles, which can take a while. It sends
+    // Msg_StartAck when done; until then stay in Stage_Syncing (the frontend
+    // keeps drawing and pumping the UI while we wait).
+    PendingStartAcks++;
 }
 
-void NetplaySession::ProcessNetwork()
+void NetplaySession::ProcessNetwork(int timeoutMs)
 {
     if (!Transport.IsConnected())
+    {
+        // Nothing to poll yet -- honor the caller's pacing so wait loops
+        // don't spin hot while the transport comes up.
+        if (timeoutMs > 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(timeoutMs));
         return;
+    }
 
     Transport.Poll([this](int peerIdx, const u8* data, u32 len, int channel) {
         if (len < 1) return;
@@ -713,7 +875,7 @@ void NetplaySession::ProcessNetwork()
             HandleControlMessage(peerIdx, data, len);
         else if (channel == Chan_Input)
             HandleInputMessage(peerIdx, data, len);
-    });
+    }, timeoutMs);
 
     if (HostMode && PendingSyncPeer >= 0)
     {
@@ -818,7 +980,7 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
                 {
                     Log(LogLevel::Error, "Netplay: failed to build instances from host data\n");
                     Stage.store(Stage_Idle);
-                    if (OnDisconnect) OnDisconnect(0, Disconnect_Error);
+                    NotifyDisconnect(0, Disconnect_Error);
                 }
             }
         }
@@ -841,7 +1003,7 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         {
             Log(LogLevel::Error, "Netplay: start received before the cart arrived\n");
             Stage.store(Stage_Idle);
-            if (OnDisconnect) OnDisconnect(0, Disconnect_Error);
+            NotifyDisconnect(0, Disconnect_Error);
             break;
         }
 
@@ -851,7 +1013,7 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         {
             Log(LogLevel::Error, "Netplay: state sync incomplete, cannot start\n");
             Stage.store(Stage_Idle);
-            if (OnDisconnect) OnDisconnect(0, Disconnect_Error);
+            NotifyDisconnect(0, Disconnect_Error);
             break;
         }
 
@@ -859,26 +1021,43 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         InputDelay = msg->InputDelay;
 
         // Both sides owe each other the first InputDelay frames of input, and
-        // neither has sent any yet -- seed them as neutral so frame 0 can run.
-        {
-            std::lock_guard<std::mutex> lock(InputMutex);
-            for (int p = 0; p < NumInstances; p++)
-            {
-                for (u32 f = CurrentFrame; f < CurrentFrame + InputDelay; f++)
-                {
-                    u32 idx = f % INPUT_BUF_SIZE;
-                    InputFrame neutral = {};
-                    neutral.FrameNum = f;
-                    neutral.KeyMask = 0xFFF;
-                    InputBuf[p][idx] = neutral;
-                    InputReady[p][idx] = true;
-                }
-            }
-        }
+        // neither has sent any yet -- wipe the history and seed those frames
+        // as neutral, exactly like the host did before taking the states.
+        ResetInputBuffers(CurrentFrame);
 
         Log(LogLevel::Info, "Netplay: starting game at frame %d with delay %d\n",
             msg->Frame, msg->InputDelay);
         Stage.store(Stage_Running);
+
+        // Start barrier: tell the host our instances are actually built and
+        // loaded, so it knows it is safe to start running frames.
+        {
+            MsgStartAck ack;
+            ack.Type = Msg_StartAck;
+            Transport.SendTo(peerIdx, &ack, sizeof(ack), Chan_Control, true);
+        }
+
+        // The transfer is over -- drop the dead-host detection from the
+        // join-survival 30-60s down to something a player would call prompt.
+        Transport.SetPeerTimeout(peerIdx, 4000, 10000);
+        break;
+    }
+
+    case Msg_StartAck:
+    {
+        if (!HostMode) break;
+
+        if (PendingStartAcks > 0)
+            PendingStartAcks--;
+        Log(LogLevel::Info, "Netplay: peer %d acked start (%d still pending)\n",
+            peerIdx, PendingStartAcks);
+
+        // This peer survived the transfer; a vanished client must now stall
+        // the session for seconds, not the join-survival 30-60s.
+        Transport.SetPeerTimeout(peerIdx, 4000, 10000);
+
+        if (PendingStartAcks == 0 && Stage.load() == Stage_Syncing)
+            Stage.store(Stage_Running);
         break;
     }
 
@@ -894,8 +1073,7 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
                 "Local hash: %016llX, remote hash: %016llX\n",
                 msg->Frame, (unsigned long long)LastStateHash, (unsigned long long)msg->Hash);
 
-            if (OnDesync)
-                OnDesync(msg->Frame, LastStateHash, msg->Hash);
+            NotifyDesync(msg->Frame, LastStateHash, msg->Hash);
         }
         break;
     }
@@ -907,8 +1085,9 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         Log(LogLevel::Info, "Netplay: peer %d disconnected (reason: %d)\n",
             peerIdx, msg->Reason);
 
-        if (OnDisconnect)
-            OnDisconnect(peerIdx, (NetplayDisconnectReason)msg->Reason);
+        // Leave the running stage so the wait loops can exit.
+        Stage.store(Stage_Idle);
+        NotifyDisconnect(peerIdx, (NetplayDisconnectReason)msg->Reason);
         break;
     }
 
@@ -1037,6 +1216,24 @@ bool NetplaySession::ClientReceiveStates()
 
     Log(LogLevel::Info, "Netplay: all states loaded successfully\n");
     return true;
+}
+
+// Hold CallbackMutex across the invocation, not just while copying: the whole
+// point of ~NetplayDialog unhooking these is that after SetXCallback(nullptr)
+// returns, no call into the (dying) dialog can still be in flight. A copy-then-
+// call-unlocked pattern leaves exactly that window open. This is safe because
+// the callbacks only post queued Qt events and never block -- a callback that
+// re-enters SetXCallback would deadlock, so don't.
+void NetplaySession::NotifyDesync(u32 frame, u64 localHash, u64 remoteHash)
+{
+    std::lock_guard<std::mutex> lock(CallbackMutex);
+    if (OnDesync) OnDesync(frame, localHash, remoteHash);
+}
+
+void NetplaySession::NotifyDisconnect(int playerID, NetplayDisconnectReason reason)
+{
+    std::lock_guard<std::mutex> lock(CallbackMutex);
+    if (OnDisconnect) OnDisconnect(playerID, reason);
 }
 
 void NetplaySession::MuteNonLocalInstances()

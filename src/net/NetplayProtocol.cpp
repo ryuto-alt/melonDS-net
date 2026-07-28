@@ -87,7 +87,8 @@ bool NetplayTransport::StartHost(int port, int maxClients)
     return true;
 }
 
-bool NetplayTransport::StartClient(const char* host, int port, int timeoutMs)
+bool NetplayTransport::StartClient(const char* host, int port, int timeoutMs,
+                                   const std::function<void()>& pollCb)
 {
     std::lock_guard<std::recursive_mutex> lock(ENetMutex);
 
@@ -119,19 +120,27 @@ bool NetplayTransport::StartClient(const char* host, int port, int timeoutMs)
         return false;
     }
 
-    // Wait for connection
+    // Wait for connection in short slices, giving the caller a chance to pump
+    // its UI event loop between slices instead of freezing for the whole
+    // timeout.
     ENetEvent event;
-    if (enet_host_service(Host, &event, timeoutMs) > 0 &&
-        event.type == ENET_EVENT_TYPE_CONNECT)
+    const int slice = 100;
+    for (int waited = 0; waited < timeoutMs; waited += slice)
     {
-        enet_peer_timeout(peer, 0, 30000, 60000);
-        Peers[0] = peer;
-        NumPeers = 1;
-        HostMode = false;
-        Connected.store(true);
+        if (enet_host_service(Host, &event, slice) > 0 &&
+            event.type == ENET_EVENT_TYPE_CONNECT)
+        {
+            enet_peer_timeout(peer, 0, 30000, 60000);
+            Peers[0] = peer;
+            NumPeers = 1;
+            HostMode = false;
+            Connected.store(true);
 
-        Log(LogLevel::Info, "Netplay: connected to %s:%d\n", host, port);
-        return true;
+            Log(LogLevel::Info, "Netplay: connected to %s:%d\n", host, port);
+            return true;
+        }
+
+        if (pollCb) pollCb();
     }
 
     Log(LogLevel::Error, "Netplay: connection to %s:%d timed out\n", host, port);
@@ -208,22 +217,32 @@ int NetplayTransport::Poll(const PacketCallback& callback, int timeoutMs)
         case ENET_EVENT_TYPE_CONNECT:
             if (HostMode)
             {
-                // New client connected
-                if (NumPeers < kNetplayMaxPlayers)
+                // New client connected. The slot index doubles as the peer's
+                // player ID (playerID = slot + 1), so a rejoining client must
+                // take the lowest slot a disconnected peer freed up -- always
+                // appending at NumPeers would hand player 2 a rejoiner in a
+                // 2-player session, which has no such instance.
+                int slot = -1;
+                for (int i = 0; i < kNetplayMaxPlayers; i++)
                 {
-                    Peers[NumPeers] = event.peer;
-                    event.peer->data = (void*)(intptr_t)NumPeers;
-                    NumPeers++;
+                    if (!Peers[i]) { slot = i; break; }
+                }
+
+                if (slot >= 0)
+                {
+                    Peers[slot] = event.peer;
+                    event.peer->data = (void*)(intptr_t)slot;
+                    if (slot >= NumPeers) NumPeers = slot + 1;
 
                     // A joining player has a whole cart to pull down before it
                     // answers anything. The stock ~5s timeout drops it long
                     // before that finishes.
                     enet_peer_timeout(event.peer, 0, 30000, 60000);
 
-                    Log(LogLevel::Info, "Netplay: peer connected (total: %d)\n", NumPeers);
+                    Log(LogLevel::Info, "Netplay: peer connected (slot %d)\n", slot);
 
                     if (OnEvent)
-                        OnEvent(NumPeers - 1, true);
+                        OnEvent(slot, true);
                 }
                 else
                 {
@@ -274,6 +293,26 @@ int NetplayTransport::Poll(const PacketCallback& callback, int timeoutMs)
     }
 
     return count;
+}
+
+bool NetplayTransport::IsPeerConnected(int peerIdx) const
+{
+    std::lock_guard<std::recursive_mutex> lock(ENetMutex);
+
+    if (peerIdx < 0 || peerIdx >= kNetplayMaxPlayers)
+        return false;
+
+    return Peers[peerIdx] != nullptr;
+}
+
+void NetplayTransport::SetPeerTimeout(int peerIdx, u32 minMs, u32 maxMs)
+{
+    std::lock_guard<std::recursive_mutex> lock(ENetMutex);
+
+    if (!Host || peerIdx < 0 || peerIdx >= kNetplayMaxPlayers || !Peers[peerIdx])
+        return;
+
+    enet_peer_timeout(Peers[peerIdx], 0, minMs, maxMs);
 }
 
 u32 NetplayTransport::GetPeerRTT(int peerIdx) const

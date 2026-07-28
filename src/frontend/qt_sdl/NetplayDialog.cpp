@@ -23,6 +23,7 @@
 #include <QStandardItemModel>
 #include <QMessageBox>
 #include <QGuiApplication>
+#include <QCoreApplication>
 #include <QClipboard>
 
 #include "LAN.h"
@@ -80,14 +81,17 @@ void NetplayStartHostDialog::done(int r)
             return;
         }
 
-        if (!inst->getNDS()->CartInserted())
+        if (!inst->getNDS() || !inst->getNDS()->CartInserted())
         {
             QMessageBox::warning(this, "Error", "Please load a ROM before starting netplay.");
             return;
         }
 
-        // Start the netplay session as host (player 0)
-        if (!inst->startNetplaySession(0, numPlayers, inputDelay))
+        // Start the netplay session as host (player 0).
+        // The session is created/destroyed on the emu thread: that thread
+        // dereferences it every loop iteration, so the UI thread must not
+        // swap it out from under it.
+        if (!inst->getEmuThread()->netplayStart(0, numPlayers, inputDelay))
         {
             QMessageBox::critical(this, "Error", "Failed to initialize netplay session.");
             return;
@@ -97,7 +101,7 @@ void NetplayStartHostDialog::done(int r)
         NetplaySession* session = inst->getNetplaySession();
         if (!session->HostStart(port))
         {
-            inst->stopNetplaySession();
+            inst->getEmuThread()->netplayStop();
             QMessageBox::critical(this, "Error", "Failed to start host on the specified port.");
             return;
         }
@@ -191,16 +195,21 @@ void NetplayStartClientDialog::done(int r)
 
         // No ROM needed on this side: the host sends its cart and firmware, and
         // the consoles are built from those once they arrive.
-        if (!inst->startNetplaySession(1, 2, 4))
+        if (!inst->getEmuThread()->netplayStart(1, 2, 4))
         {
             QMessageBox::critical(this, "Error", "Failed to initialize netplay session.");
             return;
         }
 
+        // Pump the Qt event loop between connect slices so the window keeps
+        // repainting; user input is excluded to avoid re-entering this code.
         NetplaySession* session = inst->getNetplaySession();
-        if (!session->ClientConnect(host.c_str(), port))
+        auto pumpUI = []() {
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        };
+        if (!session->ClientConnect(host.c_str(), port, 5000, pumpUI))
         {
-            inst->stopNetplaySession();
+            inst->getEmuThread()->netplayStop();
             QMessageBox::critical(this, "Error",
                 QString("Failed to connect to %1:%2").arg(QString::fromStdString(host)).arg(port));
             return;
@@ -263,6 +272,18 @@ NetplayDialog::NetplayDialog(QWidget* parent, EmuInstance* inst)
 
 NetplayDialog::~NetplayDialog()
 {
+    // The desync/disconnect callbacks capture `this`, and the session can
+    // outlive this WA_DeleteOnClose dialog. Unhook them before the dialog
+    // dies or the emu thread will call into freed memory.
+    if (emuInstance)
+    {
+        if (NetplaySession* session = emuInstance->getNetplaySession())
+        {
+            session->SetDesyncCallback(nullptr);
+            session->SetDisconnectCallback(nullptr);
+        }
+    }
+
     if (updateTimer)
     {
         updateTimer->stop();
@@ -281,7 +302,9 @@ void NetplayDialog::onDisconnect()
 {
     if (emuInstance)
     {
-        emuInstance->stopNetplaySession();
+        // Tear the session down on the emu thread (it is the thread that
+        // touches the session every loop iteration).
+        emuInstance->getEmuThread()->netplayStop();
     }
     close();
 }
@@ -322,7 +345,16 @@ void NetplayDialog::onUpdateTimer()
         QString name = (i == session->GetLocalPlayerID()) ? "You" : QString("Player %1").arg(i);
         model->setItem(i, 1, new QStandardItem(name));
 
-        QString playerStatus = session->GetInstance(i) ? "Active" : "N/A";
+        // Actual connection state, not GetInstance() -- the mirror instances
+        // all exist locally from the start, which made every seat look
+        // "Active" before anyone had even connected.
+        QString playerStatus;
+        if (i == session->GetLocalPlayerID())
+            playerStatus = "You";
+        else if (session->IsPlayerConnected(i))
+            playerStatus = "Connected";
+        else
+            playerStatus = "Waiting";
         model->setItem(i, 2, new QStandardItem(playerStatus));
     }
 }

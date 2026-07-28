@@ -152,6 +152,9 @@ void EmuThread::run()
     emuInstance->fastForwardToggled = false;
     emuInstance->slowmoToggled = false;
 
+    // Last netplay stage an OSD wait message was shown for (-1 = none)
+    int netplayWaitStage = -1;
+
     while (emuStatus != emuStatus_Exit)
     {
         if (emuInstance->instanceID == 0)
@@ -177,6 +180,10 @@ void EmuThread::run()
                 {
                     emuStatus = emuStatus_Running;
                     emuActive = true;
+
+                    // The usual msg_EmuRun path never runs on a guest, so the
+                    // audio device has to be started here or the game is mute.
+                    emuInstance->audioEnable();
                 }
             }
         }
@@ -284,14 +291,44 @@ void EmuThread::run()
             // process input and hotkeys
             NetplaySession* netplaySession = emuInstance->getNetplaySession();
 
-            if (netplaySession && netplaySession->IsActive() && !netplaySession->IsRunning())
+            // The host keeps its own game running while nobody has joined yet
+            // (Stage_Idle): there is no peer to desync from, so freezing at
+            // frame 0 buys nothing and looks like a hang. Clients and any
+            // session mid-handshake (Stage_Syncing) still wait below.
+            bool netplayFreeRun = netplaySession && netplaySession->IsActive() &&
+                                  netplaySession->IsHost() &&
+                                  netplaySession->GetStage() == NetplaySession::Stage_Idle;
+
+            if (netplaySession && netplaySession->IsActive() &&
+                !netplaySession->IsRunning() && !netplayFreeRun)
             {
                 // Handshake / savestate transfer still in flight. Advancing a
                 // frame here would desync us from the peer before we even start.
-                netplaySession->ProcessNetwork();
-                std::this_thread::sleep_for(std::chrono::milliseconds(4));
+                // Skip ONLY the emulation: the screen keeps drawing and the UI
+                // message queue keeps pumping, or the whole app locks up here
+                // (this branch used to bypass handleMessages entirely).
+                int stage = netplaySession->GetStage();
+                if (stage != netplayWaitStage)
+                {
+                    netplayWaitStage = stage;
+                    emuInstance->osdAddMessage(0, (stage == NetplaySession::Stage_Idle) ?
+                        "Waiting for players..." : "Syncing netplay session...");
+                }
+
+                // Blocking service doubles as pacing: it wakes early when
+                // packets arrive (fast blob transfer), and caps this loop at
+                // ~60Hz otherwise.
+                netplaySession->ProcessNetwork(16);
+
+                emuInstance->drawScreen();
+                emit windowUpdate();
+                handleMessages();
+                // handleMessages may have destroyed the session
+                // (msg_NetplayStop) -- do not touch netplaySession below.
                 continue;
             }
+
+            netplayWaitStage = -1;
 
             if (netplaySession && netplaySession->IsActive())
             {
@@ -309,20 +346,53 @@ void EmuThread::run()
                     localInput.LidClosed = 1;
 
                 netplaySession->SetLocalInput(localInput);
+
+                // Free-run: nobody is connected, so play the other seats with
+                // neutral input. Every mirror console keeps stepping together
+                // (advancing only one would make its LocalMP exchanges eat the
+                // 25ms recv timeout on every packet). This also heals the
+                // input gaps a disconnecting client leaves behind.
+                if (netplayFreeRun)
+                    netplaySession->SeedIdleInputs();
+
                 netplaySession->SendLocalInput(localInput);
                 netplaySession->ProcessNetwork();
 
+                // That ProcessNetwork call may just have accepted a peer:
+                // HostSyncPeer has then already parked the consoles and taken
+                // its savestates. Running one more frame here would advance us
+                // past our own snapshot, so go wait in the Syncing branch.
+                if (netplayFreeRun &&
+                    netplaySession->GetStage() != NetplaySession::Stage_Idle)
+                    continue;
+
+                if (!netplayFreeRun)
+                {
                 // Wait until all player inputs are available for this frame.
-                // Bail out if the session dies, otherwise this spins forever.
+                // Keep pumping the UI message queue while waiting, and bail out
+                // the moment the session dies, disconnects, or a message
+                // changes our state -- otherwise this loop is where the whole
+                // app used to freeze.
+                EmuStatusKind statusAtFrameStart = emuStatus;
                 while (!netplaySession->ReadyForFrame(netplaySession->GetFrameNum()))
                 {
-                    if (!netplaySession->IsRunning()) break;
+                    if (!netplaySession->IsActive() || !netplaySession->IsRunning()) break;
                     netplaySession->ProcessNetwork();
+                    handleMessages();
+                    // handleMessages may have torn the session down or
+                    // paused/stopped emulation -- re-check everything.
+                    netplaySession = emuInstance->getNetplaySession();
+                    if (!netplaySession || emuStatus != statusAtFrameStart) break;
                     std::this_thread::sleep_for(std::chrono::microseconds(200));
                 }
 
-                if (!netplaySession->IsRunning())
+                // Only run the frame if the session is still fully alive and
+                // nothing changed under us; RunFrame would block indefinitely
+                // on a dead or half-synced session.
+                if (!netplaySession || !netplaySession->IsActive() ||
+                    !netplaySession->IsRunning() || emuStatus != statusAtFrameStart)
                     continue;
+                }
             }
             else if (emuInstance->nds)
             {
@@ -443,7 +513,7 @@ void EmuThread::run()
             else if (!emuInstance->doLimitFPS && !emuInstance->doAudioSync) emuInstance->curFPS = 1000.0;
             else emuInstance->curFPS = emuInstance->targetFPS;
 
-            if (emuInstance->audioDSiVolumeSync && emuInstance->nds->ConsoleType == 1)
+            if (emuInstance->audioDSiVolumeSync && emuInstance->nds && emuInstance->nds->ConsoleType == 1)
             {
                 DSi* dsi = static_cast<DSi*>(emuInstance->nds);
                 u8 volumeLevel = dsi->I2C.GetBPTWL()->GetVolumeLevel();
@@ -517,7 +587,19 @@ void EmuThread::run()
             snprintf(melontitle, sizeof(melontitle), "melonDS " MELONDS_VERSION);
             changeWindowTitle(melontitle);
 
-            SDL_Delay(75);
+            NetplaySession* np = emuInstance->getNetplaySession();
+            if (np && np->IsActive() && !np->IsRunning())
+            {
+                // A joining guest sits in this branch (it never reaches
+                // emuStatus_Running until the session starts). One network
+                // poll per 75ms tick would take minutes to pull a ROM down in
+                // 64KB chunks -- service ENet at millisecond cadence between
+                // redraws instead.
+                for (int i = 0; i < 18; i++)
+                    np->ProcessNetwork(4);
+            }
+            else
+                SDL_Delay(75);
 
             emuInstance->drawScreen();
         }
@@ -605,7 +687,7 @@ void EmuThread::handleMessages()
             break;
 
         case msg_EmuStop:
-            if (msg.param.value<bool>())
+            if (msg.param.value<bool>() && emuInstance->nds)
                 emuInstance->nds->Stop();
             emuStatus = emuStatus_Paused;
             emuActive = false;
@@ -615,10 +697,15 @@ void EmuThread::handleMessages()
             break;
 
         case msg_EmuFrameStep:
+            // No console of our own (netplay guest / no ROM loaded):
+            // stepping would dereference a null nds further down the loop.
+            if (!emuInstance->nds) break;
             emuStatus = emuStatus_FrameStep;
             break;
 
         case msg_EmuReset:
+            // No console of our own (netplay guest / no ROM loaded): ignore.
+            if (!emuInstance->nds) break;
             emuInstance->reset();
 
             emuStatus = emuStatus_Running;
@@ -731,6 +818,41 @@ void EmuThread::handleMessages()
 
         case msg_EnableCheats:
             emuInstance->enableCheats(msg.param.value<bool>());
+            break;
+
+        case msg_NetplayStart:
+            {
+                // startNetplaySession tears down any previous session first,
+                // so the same audio guard as msg_NetplayStop applies: the SDL
+                // callback must not race the mirror instances' teardown.
+                emuInstance->audioDisable();
+                QVariantList args = msg.param.value<QVariantList>();
+                msgResult = emuInstance->startNetplaySession(
+                    args[0].toInt(), args[1].toInt(), args[2].toInt()) ? 1 : 0;
+                if (emuInstance->nds && emuStatus == emuStatus_Running)
+                    emuInstance->audioEnable();
+            }
+            break;
+
+        case msg_NetplayStop:
+            // Kill audio first: the SDL audio callback reads the mirror
+            // instances through getDisplayNDS() and must not race their
+            // teardown.
+            emuInstance->audioDisable();
+            emuInstance->stopNetplaySession();
+            if (!emuInstance->nds)
+            {
+                // A netplay guest has no console of its own. Leaving
+                // emuStatus at Running would null-deref in the main loop.
+                emuStatus = emuStatus_Paused;
+                emuActive = false;
+                emit windowEmuStop();
+            }
+            else if (emuStatus == emuStatus_Running)
+            {
+                // The host keeps running its own console standalone.
+                emuInstance->audioEnable();
+            }
             break;
         }
 
@@ -932,6 +1054,20 @@ int EmuThread::importSavefile(const QString& filename)
 void EmuThread::enableCheats(bool enable)
 {
     sendMessage({.type = msg_EnableCheats, .param = enable});
+    waitMessage();
+}
+
+int EmuThread::netplayStart(int localPlayerID, int numPlayers, int inputDelay)
+{
+    sendMessage({.type = msg_NetplayStart,
+                 .param = QVariantList{localPlayerID, numPlayers, inputDelay}});
+    waitMessage();
+    return msgResult;
+}
+
+void EmuThread::netplayStop()
+{
+    sendMessage(msg_NetplayStop);
     waitMessage();
 }
 

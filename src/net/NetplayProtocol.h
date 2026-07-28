@@ -59,6 +59,7 @@ enum NetplayMsgType : u8
     Msg_BlobEnd         = 0x14,
     Msg_SyncReady       = 0x15,
     Msg_StartGame       = 0x16,
+    Msg_StartAck        = 0x17,   // client -> host: instances built, ready to run
     Msg_DesyncAlert     = 0x20,
     Msg_Disconnect      = 0xFF,
 };
@@ -163,6 +164,11 @@ struct MsgStartGame
     u8 InputDelay;
 };
 
+struct MsgStartAck
+{
+    u8 Type;        // Msg_StartAck
+};
+
 struct MsgDesyncAlert
 {
     u8 Type;        // Msg_DesyncAlert
@@ -211,14 +217,27 @@ public:
     // Host: create server listening on port
     bool StartHost(int port, int maxClients);
 
-    // Client: connect to host
-    bool StartClient(const char* host, int port, int timeoutMs = 5000);
+    // Client: connect to host. pollCb (if given) runs every ~100ms while
+    // waiting, so the caller can keep its UI event loop alive.
+    bool StartClient(const char* host, int port, int timeoutMs = 5000,
+                     const std::function<void()>& pollCb = nullptr);
 
     void Stop();
 
     bool IsConnected() const { return Connected.load(); }
     bool IsHost() const { return HostMode; }
     int GetNumPeers() const { return NumPeers; }
+
+    // Whether a given peer slot currently holds a live connection.
+    // (GetNumPeers is a high-water mark: slots stay counted after their peer
+    // disconnects, so it cannot answer this question.)
+    bool IsPeerConnected(int peerIdx) const;
+
+    // Adjust ENet's dead-peer detection for one peer. The huge join-time
+    // timeout exists to survive the cart transfer; once the session is
+    // running it makes a vanished peer stall the game for 30-60s, so the
+    // handshake tightens it down when the transfer is done.
+    void SetPeerTimeout(int peerIdx, u32 minMs, u32 maxMs);
 
     // Send to a specific peer (0-indexed among connected peers)
     void SendTo(int peerIdx, const void* data, u32 len, int channel, bool reliable);
@@ -234,9 +253,15 @@ public:
     // Get round-trip time to a peer in ms
     u32 GetPeerRTT(int peerIdx) const;
 
-    // Callback for connection/disconnection events
+    // Callback for connection/disconnection events.
+    // Locks ENetMutex: the UI thread sets this while the emu thread may be
+    // inside Poll() reading it.
     using EventCallback = std::function<void(int peerIdx, bool connected)>;
-    void SetEventCallback(const EventCallback& cb) { OnEvent = cb; }
+    void SetEventCallback(const EventCallback& cb)
+    {
+        std::lock_guard<std::recursive_mutex> lock(ENetMutex);
+        OnEvent = cb;
+    }
 
 private:
     ENetHost* Host = nullptr;
@@ -249,7 +274,8 @@ private:
 
     // Poll() holds this while it runs the packet callback, and handlers reply
     // from inside that callback -- a plain mutex self-deadlocks there.
-    std::recursive_mutex ENetMutex;
+    // mutable: const readers (IsPeerConnected) still have to lock it.
+    mutable std::recursive_mutex ENetMutex;
 };
 
 // ---- Blob sender/receiver ----

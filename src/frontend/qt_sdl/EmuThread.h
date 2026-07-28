@@ -84,6 +84,12 @@ public:
         msg_ImportSavefile,
 
         msg_EnableCheats,
+
+        // Netplay session lifecycle. The session must be created/destroyed on
+        // the emu thread: it is the thread that dereferences the session every
+        // loop iteration, so the UI thread must never delete it out from under.
+        msg_NetplayStart,
+        msg_NetplayStop,
     };
 
     struct Message
@@ -126,6 +132,10 @@ public:
     int importSavefile(const QString& filename);
 
     void enableCheats(bool enable);
+
+    // Netplay session lifecycle, to be called from the UI thread
+    int netplayStart(int localPlayerID, int numPlayers, int inputDelay);
+    void netplayStop();
 
     bool emuIsRunning();
     bool emuIsActive();

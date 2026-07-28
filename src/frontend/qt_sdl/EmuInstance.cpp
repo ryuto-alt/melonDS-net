@@ -905,8 +905,23 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
 
     // Host: everyone in the session runs on this machine's firmware, so grab it
     // before the instances are built.
+    bool realFirmware = false;
     if (auto fw = loadFirmware(0))
+    {
         netplaySession->SetSharedData(fw->Buffer(), fw->Length());
+        realFirmware = globalCfg.GetBool("Emu.ExternalBIOSEnable");
+    }
+
+    if (!realFirmware)
+    {
+        // Generated firmware has no DS menu, so download-play guest consoles
+        // (which get no cart) would sit on a black screen forever. Give every
+        // console the cart and direct-boot instead.
+        netplaySession->SetDownloadPlay(false);
+        Platform::Log(Platform::LogLevel::Info,
+            "Netplay: generated firmware in use, disabling download play "
+            "(every console gets the cart and direct-boots)\n");
+    }
 
     if (!netplaySession->CreateInstances(argsBuilder, this))
     {
