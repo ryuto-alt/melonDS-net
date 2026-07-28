@@ -93,6 +93,11 @@ public:
     EmuThread* getEmuThread() { return emuThread; }
     melonDS::NDS* getNDS() { return nds; }
 
+    // During netplay the frames are run on the mirror instances, not on `nds`.
+    // Anything that shows the player what the console is doing -- video, audio --
+    // has to read from the mirror we control, or it sits on a stale framebuffer.
+    melonDS::NDS* getDisplayNDS();
+
     // Netplay session management
     melonDS::NetplaySession* getNetplaySession() { return netplaySession.get(); }
     bool startNetplaySession(int localPlayerID, int numPlayers, int inputDelay = 4);

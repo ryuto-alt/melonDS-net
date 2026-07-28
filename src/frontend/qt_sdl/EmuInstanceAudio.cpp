@@ -140,7 +140,7 @@ void EmuInstance::audioSync()
     if (audioDevice)
     {
         SDL_LockMutex(audioSyncLock);
-        while (nds->SPU.GetOutputSize() >= audioBufSize)
+        while (getDisplayNDS()->SPU.GetOutputSize() >= audioBufSize)
         {
             int ret = SDL_CondWaitTimeout(audioSyncCond, audioSyncLock, 500);
             if (ret == SDL_MUTEX_TIMEDOUT) break;
@@ -165,14 +165,15 @@ void EmuInstance::audioCallback(void* data, Uint8* stream, int len)
     len /= (sizeof(s16) * 2);
 
     double skew = std::clamp(inst->targetFPS / INTERNAL_FRAME_RATE, 0.995, 1.005);
-    inst->nds->SPU.SetOutputSkew(skew);
+    NDS* audioNDS = inst->getDisplayNDS();
+    audioNDS->SPU.SetOutputSkew(skew);
 
     int len_in = inst->audioGetNumSamplesOut(len);
     if (len_in > inst->audioBufSize) len_in = inst->audioBufSize;
     s16 buf_in[inst->audioBufSize*2];
 
     SDL_LockMutex(inst->audioSyncLock);
-    int num_in = inst->nds->SPU.ReadOutput((s16*) stream, len_in);
+    int num_in = audioNDS->SPU.ReadOutput((s16*) stream, len_in);
     SDL_CondSignal(inst->audioSyncCond);
     SDL_UnlockMutex(inst->audioSyncLock);
 

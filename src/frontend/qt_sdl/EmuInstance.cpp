@@ -823,6 +823,16 @@ void EmuInstance::undoStateLoad()
 
 // ---- Netplay session management ----
 
+NDS* EmuInstance::getDisplayNDS()
+{
+    if (netplaySession && netplaySession->IsActive())
+    {
+        if (NDS* mirror = netplaySession->GetDisplayInstance())
+            return mirror;
+    }
+    return nds;
+}
+
 bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inputDelay)
 {
     stopNetplaySession();

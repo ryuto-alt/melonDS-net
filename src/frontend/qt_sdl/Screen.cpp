@@ -823,7 +823,7 @@ void ScreenPanelNative::drawScreen()
         return;
     }
 
-    auto nds = emuInstance->getNDS();
+    auto nds = emuInstance->getDisplayNDS();
     assert(nds != nullptr);
 
     bufferLock.lock();
@@ -1162,7 +1162,7 @@ void ScreenPanelGL::drawScreen()
 
     if (emuThread->emuIsActive())
     {
-        auto nds = emuInstance->getNDS();
+        auto nds = emuInstance->getDisplayNDS();
 
         glUseProgram(screenShaderProgram);
         glUniform2f(screenShaderScreenSizeULoc, w / factor, h / factor);
