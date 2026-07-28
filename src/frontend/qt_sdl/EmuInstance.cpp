@@ -836,11 +836,23 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
     }
 
     // Build NDS instances using current config
-    auto argsBuilder = [this]() -> NDSArgs {
+    auto argsBuilder = [this](int instIdx) -> NDSArgs {
+        // Lockstep needs both machines byte-identical, and the firmware is NOT
+        // part of a savestate (see FirmwareMem::DoSavestate), so the handshake
+        // can't fix a mismatch. Use the stock generated firmware and ignore the
+        // local nickname/colour/MAC settings entirely.
+        // Each mirror instance still needs a distinct MAC, or the emulated DSes
+        // can't tell each other apart over the local wireless.
+        Firmware fw {0};
+        auto& header = fw.GetHeader();
+        header.MacAddr = MacAddress {0x00, 0x09, 0xBF, 0x11, 0x22, (u8)(0x33 + instIdx)};
+        header.UpdateChecksum();
+        fw.UpdateChecksums();
+
         NDSArgs args {
             loadARM9BIOS(),
             loadARM7BIOS(),
-            generateFirmware(0),
+            std::move(fw),
         };
 
         auto& jitcfg = globalCfg;

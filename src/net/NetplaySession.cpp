@@ -130,11 +130,15 @@ bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder, void* or
 
     for (int i = 0; i < NumInstances; i++)
     {
-        NDSArgs args = argsBuilder();
+        NDSArgs args = argsBuilder(i);
 
         // Each instance gets a NetplayInstanceData as userdata
         // so that Platform::MP_* callbacks can route to the correct LocalMP instance
         // OrigUserdata points to EmuInstance* so non-MP Platform callbacks still work
+        // The ctor memsets InstData, so the in-class default for Magic is gone.
+        // Platform::GetEmuInstance keys off it -- without it our struct gets
+        // cast straight to EmuInstance* and the first callback crashes.
+        InstData[i].Magic = NetplayInstanceData::kMagic;
         InstData[i].InstID = i;
         InstData[i].Session = this;
         InstData[i].OrigUserdata = origUserdata;

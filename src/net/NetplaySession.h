@@ -94,7 +94,8 @@ public:
 
     // ROM must be loaded before starting.
     // Creates NDS instances internally using the provided args builder.
-    using NDSArgsBuilder = std::function<NDSArgs()>;
+    // Takes the mirror instance index: each one needs its own MAC address.
+    using NDSArgsBuilder = std::function<NDSArgs(int instIdx)>;
     bool CreateInstances(const NDSArgsBuilder& argsBuilder, void* origUserdata = nullptr);
 
     // Load ROM into all instances

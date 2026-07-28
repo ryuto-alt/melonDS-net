@@ -17,6 +17,15 @@ target_include_directories(net-utils PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# NetplaySession.cpp includes NDS.h and news up NDS instances, but this target
+# does not link core, so it never picks up core's PUBLIC JIT_ENABLED. Compiling
+# NDS.h both ways is an ODR violation: without JIT the ARMJIT member is gone and
+# sizeof(NDS) drops by ~80MB, so `new NDS` under-allocates and the constructor
+# (built with JIT) memsets a 64MB lookup table straight past the end of it.
+if (ENABLE_JIT)
+    target_compile_definitions(net-utils PUBLIC JIT_ENABLED)
+endif()
+
 option(USE_SYSTEM_LIBSLIRP "Use system libslirp instead of the bundled version" OFF)
 if (USE_SYSTEM_LIBSLIRP)
     pkg_check_modules(Slirp REQUIRED IMPORTED_TARGET slirp)
