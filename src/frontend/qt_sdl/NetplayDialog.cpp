@@ -112,7 +112,7 @@ void NetplayStartHostDialog::done(int r)
             QMessageBox::information(this, "melonDS",
                 QString("インターネット越しの接続先:\n\n    %0\n\n"
                         "クリップボードにコピーしました。\n"
-                        "相手は同じROMを読み込んでから「Mirror Netplay Join」に貼り付けてください。").arg(target));
+                        "相手は「ネットでダウンロードプレイ (参加)」に貼り付けるだけです。ROMは不要です。").arg(target));
         }
         else
         {
@@ -189,14 +189,8 @@ void NetplayStartClientDialog::done(int r)
             return;
         }
 
-        if (!inst->getNDS()->CartInserted())
-        {
-            QMessageBox::warning(this, "Error", "Please load the same ROM as the host before joining.");
-            return;
-        }
-
-        // Client will receive numPlayers and inputDelay from host during handshake.
-        // For now, use defaults - they'll be updated after connection.
+        // No ROM needed on this side: the host sends its cart and firmware, and
+        // the consoles are built from those once they arrive.
         if (!inst->startNetplaySession(1, 2, 4))
         {
             QMessageBox::critical(this, "Error", "Failed to initialize netplay session.");
@@ -247,9 +241,9 @@ NetplayDialog::NetplayDialog(QWidget* parent, EmuInstance* inst)
     if (session)
     {
         if (session->IsHost())
-            ui->lblStatus->setText("Status: Hosting (waiting for players...)");
+            ui->lblStatus->setText("状態: ホスト中（参加待ち…）");
         else
-            ui->lblStatus->setText("Status: Connected to host");
+            ui->lblStatus->setText("状態: ホストに接続済み");
 
         // Set up desync callback
         session->SetDesyncCallback([this](melonDS::u32 frame, melonDS::u64 localHash, melonDS::u64 remoteHash) {

@@ -130,7 +130,7 @@ bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder, void* or
 
     for (int i = 0; i < NumInstances; i++)
     {
-        NDSArgs args = argsBuilder(i);
+        NDSArgs args = argsBuilder(i, FirmwareData);
 
         // Each instance gets a NetplayInstanceData as userdata
         // so that Platform::MP_* callbacks can route to the correct LocalMP instance
@@ -208,6 +208,14 @@ bool NetplaySession::LoadROM(std::unique_ptr<NDSCart::CartCommon> cart)
     return true;
 }
 
+void NetplaySession::SetSharedData(const u8* firmware, u32 fwlen)
+{
+    if (firmware && fwlen)
+        FirmwareData.assign(firmware, firmware + fwlen);
+    else
+        FirmwareData.clear();
+}
+
 bool NetplaySession::LoadROMData(const u8* romdata, u32 romlen)
 {
     if (!romdata || romlen == 0 || NumInstances == 0)
@@ -220,6 +228,16 @@ bool NetplaySession::LoadROMData(const u8* romdata, u32 romlen)
 
     for (int i = 0; i < NumInstances; i++)
     {
+        // Download play: only player 0 owns the cart. Everyone else boots the
+        // firmware menu with an empty slot and receives the game over the
+        // emulated wireless from instance 0 -- the real thing, not a copy.
+        if (DownloadPlay && i != 0)
+        {
+            Instances[i]->SetNDSCart(nullptr);
+            Instances[i]->Reset();
+            continue;
+        }
+
         auto cart = NDSCart::ParseROM(ROMData.data(), romlen, &InstData[i]);
         if (!cart)
         {
@@ -234,8 +252,8 @@ bool NetplaySession::LoadROMData(const u8* romdata, u32 romlen)
             Instances[i]->SetupDirectBoot("");
     }
 
-    Log(LogLevel::Info, "Netplay: ROM (%u bytes, hash %016llX) booted on %d instances\n",
-        romlen, (unsigned long long)ROMHash, NumInstances);
+    Log(LogLevel::Info, "Netplay: ROM (%u bytes, hash %016llX) loaded, %d instances, download play %s\n",
+        romlen, (unsigned long long)ROMHash, NumInstances, DownloadPlay ? "on" : "off");
     return true;
 }
 
@@ -457,6 +475,21 @@ u32 NetplaySession::RunFrame()
     if (!Active.load() || NumInstances == 0)
         return 0;
 
+    // Frame-level trace: without it a stalled game is indistinguishable from a
+    // stalled emulator. Reports how long each instance actually spent running,
+    // and whether the DS consoles are still talking to each other.
+    if ((CurrentFrame % 60) == 0)
+    {
+        u32 mp = LMP.GetTrafficCount();
+        Log(LogLevel::Info,
+            "Netplay: frame %u | last frame %u ms | MP packets since last report: %u | scanlines %u/%u\n",
+            CurrentFrame, LastFrameMS, mp - LastMPTraffic,
+            InstanceScanlines[0], InstanceScanlines[NumInstances > 1 ? 1 : 0]);
+        LastMPTraffic = mp;
+    }
+
+    u32 t0 = (u32)Platform::GetMSCount();
+
     // Apply inputs for current frame to all instances
     ApplyInputs(CurrentFrame);
 
@@ -470,6 +503,8 @@ u32 NetplaySession::RunFrame()
 
     // Wait for all instance threads to finish
     FrameBarrier->arrive_and_wait();
+
+    LastFrameMS = (u32)Platform::GetMSCount() - t0;
 
     // Desync check every DESYNC_CHECK_INTERVAL frames
     if (CurrentFrame > 0 && (CurrentFrame % DESYNC_CHECK_INTERVAL) == 0)
@@ -592,6 +627,7 @@ void NetplaySession::HostSyncPeer(int peerIdx)
     offer.ROMHash = ROMHash;
     offer.NumPlayers = (u8)NumInstances;
     offer.InputDelay = (u8)InputDelay;
+    offer.DownloadPlay = DownloadPlay ? 1 : 0;
     Transport.SendTo(peerIdx, &offer, sizeof(offer), Chan_Control, true);
 
     MsgSessionAccept accept;
@@ -599,7 +635,23 @@ void NetplaySession::HostSyncPeer(int peerIdx)
     accept.PlayerID = (u8)playerID;
     Transport.SendTo(peerIdx, &accept, sizeof(accept), Chan_Control, true);
 
-    if (!HostSendStates(peerIdx))
+    // The joining player brings nothing but melonDS. Ship it the firmware every
+    // machine must agree on, then the cart itself.
+    if (!FirmwareData.empty())
+        BlobTransfer::Send(Transport, peerIdx, Blob_Firmware, FirmwareData.data(), (u32)FirmwareData.size());
+
+    BlobTransfer::Send(Transport, peerIdx, Blob_CartROM, ROMData.data(), (u32)ROMData.size());
+
+    // Savestates are only needed if this session already ran. The host sits at
+    // Stage_Idle until somebody joins, so at frame 0 both sides are a plain
+    // reset of the same cart and firmware -- byte-identical already. Skipping
+    // them here takes ~38MB off the join, which was the bulk of the wait and
+    // long enough for ENet to drop the peer.
+    if (CurrentFrame == 0)
+    {
+        Log(LogLevel::Info, "Netplay: peer %d joined at frame 0, skipping state transfer\n", peerIdx);
+    }
+    else if (!HostSendStates(peerIdx))
     {
         Log(LogLevel::Error, "Netplay: failed to send states to peer %d\n", peerIdx);
         Stage.store(Stage_Idle);
@@ -667,28 +719,11 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         Log(LogLevel::Info, "Netplay: received session offer (players: %d, delay: %d)\n",
             msg->NumPlayers, msg->InputDelay);
 
-        if (msg->ROMHash != ROMHash)
-        {
-            // Lockstep only works if both sides run byte-identical carts.
-            Log(LogLevel::Error, "Netplay: ROM mismatch (host %016llX, local %016llX)\n",
-                (unsigned long long)msg->ROMHash, (unsigned long long)ROMHash);
-            MsgDisconnect bye;
-            bye.Type = Msg_Disconnect;
-            bye.Reason = Disconnect_Error;
-            Transport.SendTo(peerIdx, &bye, sizeof(bye), Chan_Control, true);
-            Stage.store(Stage_Idle);
-            if (OnDisconnect) OnDisconnect(0, Disconnect_Error);
-            break;
-        }
-
-        if (!RebuildInstances(msg->NumPlayers))
-        {
-            Log(LogLevel::Error, "Netplay: cannot host %d players\n", msg->NumPlayers);
-            Stage.store(Stage_Idle);
-            break;
-        }
-
+        // Everything we need is on its way: player count, delay, and the cart
+        // and firmware themselves. Nothing has to exist locally beforehand.
+        OfferedPlayers = msg->NumPlayers;
         InputDelay = msg->InputDelay;
+        DownloadPlay = (msg->DownloadPlay != 0);
         Stage.store(Stage_Syncing);
 
         MsgSyncReady ready;
@@ -729,7 +764,34 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
     {
         if (CurBlobIdx < 0) break;
         if (BlobRecv[CurBlobIdx].OnMessage(data, len))
+        {
             Log(LogLevel::Info, "Netplay: blob %d received\n", CurBlobIdx);
+
+            if (CurBlobIdx == Blob_Firmware)
+            {
+                const auto& fw = BlobRecv[Blob_Firmware].GetData();
+                SetSharedData(fw.data(), (u32)fw.size());
+                BlobRecv[Blob_Firmware].Reset();
+            }
+            else if (CurBlobIdx == Blob_CartROM)
+            {
+                // Cart and firmware are both here -- now we can build the same
+                // set of consoles the host is running.
+                const auto& rom = BlobRecv[Blob_CartROM].GetData();
+                std::vector<u8> romcopy = rom;
+                BlobRecv[Blob_CartROM].Reset();
+
+                DestroyInstances();
+                NumInstances = OfferedPlayers > 0 ? OfferedPlayers : 2;
+                if (!CreateInstances(ArgsBuilder, OrigUserdata) ||
+                    !LoadROMData(romcopy.data(), (u32)romcopy.size()))
+                {
+                    Log(LogLevel::Error, "Netplay: failed to build instances from host data\n");
+                    Stage.store(Stage_Idle);
+                    if (OnDisconnect) OnDisconnect(0, Disconnect_Error);
+                }
+            }
+        }
         CurBlobIdx = -1;
         break;
     }
@@ -745,8 +807,17 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         if (len < sizeof(MsgStartGame)) break;
         const MsgStartGame* msg = (const MsgStartGame*)data;
 
-        // Every savestate arrived ahead of this on the reliable channel.
-        if (!ClientReceiveStates())
+        if (!HasInstances())
+        {
+            Log(LogLevel::Error, "Netplay: start received before the cart arrived\n");
+            Stage.store(Stage_Idle);
+            if (OnDisconnect) OnDisconnect(0, Disconnect_Error);
+            break;
+        }
+
+        // Joining at frame 0 means the host skipped the state transfer: our
+        // freshly reset instances already match it.
+        if (msg->Frame != 0 && !ClientReceiveStates())
         {
             Log(LogLevel::Error, "Netplay: state sync incomplete, cannot start\n");
             Stage.store(Stage_Idle);

@@ -159,6 +159,8 @@ int LocalMP::SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 time
 
     Mutex_Lock(MPQueueLock);
 
+    TrafficCount++;
+
     u16 mask = MPStatus.ConnectedBitmask;
 
     // TODO: check if the FIFO is full!

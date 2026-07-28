@@ -159,6 +159,28 @@ void EmuThread::run()
 
         emuInstance->inputProcess();
 
+        // Netplay has to be serviced outside the "emulator is running" branch.
+        // A joining player owns no ROM, so nothing ever put this thread into
+        // the running state -- it would sit there having connected at the
+        // socket level and never process a single handshake message. The same
+        // applies whenever the emulator is paused mid-session: the peer must
+        // not be left hanging.
+        if (NetplaySession* np = emuInstance->getNetplaySession())
+        {
+            if (np->IsActive())
+            {
+                np->ProcessNetwork();
+
+                // Once the host's cart, firmware and state have landed, this
+                // side has a console to run even though no ROM was ever opened.
+                if (np->IsRunning() && emuStatus != emuStatus_Running)
+                {
+                    emuStatus = emuStatus_Running;
+                    emuActive = true;
+                }
+            }
+        }
+
         if (emuInstance->hotkeyPressed(HK_FrameLimitToggle)) emit windowLimitFPSChange();
 
         if (emuInstance->hotkeyPressed(HK_Pause)) emuTogglePause();
@@ -174,6 +196,11 @@ void EmuThread::run()
         {
             if (emuStatus == emuStatus_FrameStep) emuStatus = emuStatus_Paused;
 
+            // A netplay guest never opened a ROM, so it has no console of its
+            // own -- only the mirrors the session built. Everything below that
+            // pokes emuInstance->nds directly has to sit out.
+            if (emuInstance->nds)
+            {
             if (emuInstance->hotkeyPressed(HK_SolarSensorDecrease))
             {
                 int level = emuInstance->nds->GBACartSlot.SetInput(GBACart::Input_SolarSensorDown, true);
@@ -227,6 +254,7 @@ void EmuThread::run()
 
                 dsi->I2C.GetBPTWL()->ProcessVolumeSwitchInput(currentTime);
             }
+            } // emuInstance->nds
 
             if (useOpenGL)
                 emuInstance->makeCurrentGL();
@@ -296,7 +324,7 @@ void EmuThread::run()
                 if (!netplaySession->IsRunning())
                     continue;
             }
-            else
+            else if (emuInstance->nds)
             {
                 emuInstance->nds->SetKeyMask(emuInstance->inputMask);
 
@@ -909,7 +937,10 @@ void EmuThread::enableCheats(bool enable)
 
 void EmuThread::updateRenderer()
 {
-    auto nds = emuInstance->nds;
+    // A netplay guest has no console of its own; the renderer belongs to the
+    // mirror instance whose screen we show.
+    auto nds = emuInstance->getDisplayNDS();
+    if (!nds) return;
 
     if (videoRenderer != lastVideoRenderer)
     {
@@ -942,7 +973,9 @@ void EmuThread::updateRenderer()
 
 void EmuThread::compileShaders()
 {
-    auto& renderer = emuInstance->nds->GPU.GetRenderer();
+    auto* cnds = emuInstance->getDisplayNDS();
+    if (!cnds) return;
+    auto& renderer = cnds->GPU.GetRenderer();
     int currentShader, shadersCount;
     u64 startTime = SDL_GetPerformanceCounter();
     // kind of hacky to look at the wallclock, though it is easier than

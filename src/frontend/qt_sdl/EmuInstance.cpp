@@ -846,16 +846,25 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
     }
 
     // Build NDS instances using current config
-    auto argsBuilder = [this](int instIdx) -> NDSArgs {
-        // Lockstep needs both machines byte-identical, and the firmware is NOT
+    auto argsBuilder = [this](int instIdx, const std::vector<u8>& fwdata) -> NDSArgs {
+        // Lockstep needs every machine byte-identical, and the firmware is NOT
         // part of a savestate (see FirmwareMem::DoSavestate), so the handshake
-        // can't fix a mismatch. Use the stock generated firmware and ignore the
-        // local nickname/colour/MAC settings entirely.
+        // can't repair a mismatch afterwards. The host's firmware is shipped to
+        // everyone; download play also needs a real dump, since that's what
+        // holds the DS menu the guest consoles boot into.
+        Firmware fw = fwdata.empty() ? Firmware {0}
+                                     : Firmware {fwdata.data(), (u32)fwdata.size()};
+
         // Each mirror instance still needs a distinct MAC, or the emulated DSes
         // can't tell each other apart over the local wireless.
-        Firmware fw {0};
         auto& header = fw.GetHeader();
-        header.MacAddr = MacAddress {0x00, 0x09, 0xBF, 0x11, 0x22, (u8)(0x33 + instIdx)};
+        MacAddress mac;
+        memcpy(&mac, header.MacAddr.data(), sizeof(MacAddress));
+        mac[0] &= 0xFC;
+        mac[3] += instIdx;
+        mac[4] += instIdx * 0x44;
+        mac[5] += instIdx * 0x10;
+        header.MacAddr = mac;
         header.UpdateChecksum();
         fw.UpdateChecksums();
 
@@ -885,14 +894,28 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
         return args;
     };
 
+    if (localPlayerID != 0)
+    {
+        // Joining player: the host owns the cart and the firmware, and both are
+        // about to arrive over the wire. Build nothing yet -- CreateInstances
+        // runs once those blobs land.
+        netplaySession->SetArgsBuilder(argsBuilder, this);
+        return true;
+    }
+
+    // Host: everyone in the session runs on this machine's firmware, so grab it
+    // before the instances are built.
+    if (auto fw = loadFirmware(0))
+        netplaySession->SetSharedData(fw->Buffer(), fw->Length());
+
     if (!netplaySession->CreateInstances(argsBuilder, this))
     {
         netplaySession.reset();
         return false;
     }
 
-    // The mirror instances start out with no cart -- give every one of them the
-    // ROM that's currently running, or they boot into nothing.
+    // The mirror instances start out with no cart -- hand them the ROM that's
+    // currently running, or they boot into nothing.
     const NDSCart::CartCommon* cart = nds->GetNDSCart();
     if (!cart || !cart->GetROM() || cart->GetROMLength() == 0)
     {

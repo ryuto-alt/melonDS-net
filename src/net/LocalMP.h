@@ -61,11 +61,17 @@ public:
     int RecvHostPacket(int inst, u8* data, u64* timestamp);
     u16 RecvReplies(int inst, u8* data, u64 timestamp, u16 aidmask);
 
+    // Counts packets actually pushed between the local consoles. If this stops
+    // moving while frames keep advancing, the game stalled, not the emulator.
+    melonDS::u32 GetTrafficCount() const { return TrafficCount; }
+
 private:
     void FIFORead(int inst, int fifo, void* buf, int len) noexcept;
     void FIFOWrite(int inst, int fifo, void* buf, int len) noexcept;
     int SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 timestamp) noexcept;
     int RecvPacketGeneric(int inst, u8* packet, bool block, u64* timestamp) noexcept;
+
+    melonDS::u32 TrafficCount = 0;
 
     Platform::Mutex* MPQueueLock;
     MPStatusData MPStatus {};

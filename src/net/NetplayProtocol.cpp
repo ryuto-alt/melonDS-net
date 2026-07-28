@@ -124,6 +124,7 @@ bool NetplayTransport::StartClient(const char* host, int port, int timeoutMs)
     if (enet_host_service(Host, &event, timeoutMs) > 0 &&
         event.type == ENET_EVENT_TYPE_CONNECT)
     {
+        enet_peer_timeout(peer, 0, 30000, 60000);
         Peers[0] = peer;
         NumPeers = 1;
         HostMode = false;
@@ -213,6 +214,11 @@ int NetplayTransport::Poll(const PacketCallback& callback, int timeoutMs)
                     Peers[NumPeers] = event.peer;
                     event.peer->data = (void*)(intptr_t)NumPeers;
                     NumPeers++;
+
+                    // A joining player has a whole cart to pull down before it
+                    // answers anything. The stock ~5s timeout drops it long
+                    // before that finishes.
+                    enet_peer_timeout(event.peer, 0, 30000, 60000);
 
                     Log(LogLevel::Info, "Netplay: peer connected (total: %d)\n", NumPeers);
 

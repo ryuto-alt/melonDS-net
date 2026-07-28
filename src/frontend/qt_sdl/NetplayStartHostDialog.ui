@@ -17,7 +17,7 @@
    </sizepolicy>
   </property>
   <property name="windowTitle">
-   <string>Mirror Netplay Host - melonDS</string>
+   <string>ダウンロードプレイをホスト - melonDS</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <property name="sizeConstraint">
@@ -28,7 +28,7 @@
      <item row="0" column="0">
       <widget class="QLabel" name="label">
        <property name="text">
-        <string>Player name:</string>
+        <string>プレイヤー名:</string>
        </property>
       </widget>
      </item>
@@ -38,7 +38,7 @@
      <item row="1" column="0">
       <widget class="QLabel" name="label_players">
        <property name="text">
-        <string>Number of players:</string>
+        <string>人数:</string>
        </property>
       </widget>
      </item>
@@ -58,7 +58,7 @@
      <item row="2" column="0">
       <widget class="QLabel" name="label_delay">
        <property name="text">
-        <string>Input delay (frames):</string>
+        <string>入力遅延 (フレーム):</string>
        </property>
       </widget>
      </item>
@@ -78,7 +78,7 @@
      <item row="3" column="0">
       <widget class="QLabel" name="label_2">
        <property name="text">
-        <string>Port:</string>
+        <string>ポート:</string>
        </property>
       </widget>
      </item>

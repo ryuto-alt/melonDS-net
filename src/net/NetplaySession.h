@@ -94,17 +94,34 @@ public:
 
     // ROM must be loaded before starting.
     // Creates NDS instances internally using the provided args builder.
-    // Takes the mirror instance index: each one needs its own MAC address.
-    using NDSArgsBuilder = std::function<NDSArgs(int instIdx)>;
+    // Takes the mirror instance index and the firmware image every machine in
+    // the session must share (empty = build a default one). Each instance still
+    // needs its own MAC address.
+    using NDSArgsBuilder = std::function<NDSArgs(int instIdx, const std::vector<u8>& firmware)>;
     bool CreateInstances(const NDSArgsBuilder& argsBuilder, void* origUserdata = nullptr);
 
     // Load ROM into all instances
     bool LoadROM(std::unique_ptr<NDSCart::CartCommon> cart);
 
-    // Give the session its own copy of the ROM and boot every mirror instance
-    // from it. Required: without a cart the instances run nothing.
+    // Give the session its own copy of the ROM. In download-play mode only
+    // player 0's instance gets the cart; the others boot the firmware menu and
+    // pull the game off it over the emulated wireless, exactly like real DSes.
     bool LoadROMData(const u8* romdata, u32 romlen);
     u64 GetROMHash() const { return ROMHash; }
+
+    // Host only: the cart and firmware bytes handed to joining players.
+    void SetSharedData(const u8* firmware, u32 fwlen);
+    void SetDownloadPlay(bool enable) { DownloadPlay = enable; }
+    bool IsDownloadPlay() const { return DownloadPlay; }
+
+    // A joining player has no ROM of its own: instances are built once the
+    // host's cart and firmware have arrived.
+    bool HasInstances() const { return NumInstances > 0 && Instances[0] != nullptr; }
+    void SetArgsBuilder(const NDSArgsBuilder& builder, void* origUserdata)
+    {
+        ArgsBuilder = builder;
+        OrigUserdata = origUserdata;
+    }
 
     // ---- Session lifecycle ----
     // Idle    -- transport up, no peer synced yet
@@ -216,6 +233,8 @@ private:
     // ---- Frame state ----
     u32 CurrentFrame = 0;
     u32 StartFrame = 0;
+    u32 LastFrameMS = 0;      // wall time the last frame took on all instances
+    u32 LastMPTraffic = 0;    // LocalMP packet count at the previous report
 
     // ---- Threading ----
     // Each instance runs in its own thread during RunFrame().
@@ -241,7 +260,10 @@ private:
 
     std::atomic<int> Stage{Stage_Idle};
     std::vector<u8> ROMData;
+    std::vector<u8> FirmwareData;   // shared by every machine, or empty for generated
     u64 ROMHash = 0;
+    bool DownloadPlay = true;
+    int OfferedPlayers = 2;     // player count the host announced
     int PendingSyncPeer = -1;   // host: peer waiting to be sent the session state
     int CurBlobIdx = -1;        // which BlobRecv the in-flight chunks belong to
 

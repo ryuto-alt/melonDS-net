@@ -465,10 +465,10 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
                 submenu->addSeparator();
 
-                actNPStartHost = submenu->addAction("Mirror Netplay Host");
+                actNPStartHost = submenu->addAction("ネットでダウンロードプレイ (ホスト)");
                 connect(actNPStartHost, &QAction::triggered, this, &MainWindow::onNPStartHost);
 
-                actNPStartClient = submenu->addAction("Mirror Netplay Join");
+                actNPStartClient = submenu->addAction("ネットでダウンロードプレイ (参加)");
                 connect(actNPStartClient, &QAction::triggered, this, &MainWindow::onNPStartClient);
             }
         }

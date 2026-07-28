@@ -78,6 +78,10 @@ enum NetplayBlobType : u8
     Blob_Savestate1 = 2,
     Blob_Savestate2 = 3,
     Blob_Savestate3 = 4,
+    // The joining side starts with nothing: the host ships it the cart and its
+    // own firmware, so the friend only needs melonDS and an address.
+    Blob_CartROM = 5,
+    Blob_Firmware = 6,
     Blob_MAX,
 };
 
@@ -116,6 +120,8 @@ struct MsgSessionOffer
     u64 ROMHash;
     u8 NumPlayers;
     u8 InputDelay;
+    u8 DownloadPlay; // 1 = only player 0 holds the cart, everyone else boots
+                     // the firmware menu and downloads from it, like real hardware
 };
 
 struct MsgSessionAccept
