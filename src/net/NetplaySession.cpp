@@ -395,50 +395,71 @@ bool NetplaySession::ReadyForFrame(u32 frameNum) const
     u32 bufIdx = frameNum % INPUT_BUF_SIZE;
     for (int i = 0; i < NumInstances; i++)
     {
-        if (!InputReady[i][bufIdx])
+        // Entries are never cleared -- the instances consume them at their own
+        // pace -- so the stored frame number is what tells a fresh slot from
+        // one left over 256 frames ago.
+        if (!InputReady[i][bufIdx] || InputBuf[i][bufIdx].FrameNum != frameNum)
             return false;
     }
     return true;
 }
 
-void NetplaySession::ApplyInputs(u32 frame)
+void NetplaySession::ApplyInput(int instIdx, u32 frame)
 {
-    u32 bufIdx = frame % INPUT_BUF_SIZE;
-
-    for (int i = 0; i < NumInstances; i++)
+    InputFrame input;
     {
-        const InputFrame& input = InputBuf[i][bufIdx];
-        Instances[i]->SetKeyMask(input.KeyMask);
-
-        if (input.Touching)
-            Instances[i]->TouchScreen(input.TouchX, input.TouchY);
-        else
-            Instances[i]->ReleaseScreen();
-
-        Instances[i]->SetLidClosed(input.LidClosed != 0);
+        std::lock_guard<std::mutex> lock(InputMutex);
+        input = InputBuf[instIdx][frame % INPUT_BUF_SIZE];
     }
 
-    // Mark this frame's inputs as consumed
-    for (int i = 0; i < NumInstances; i++)
-        InputReady[i][bufIdx] = false;
+    Instances[instIdx]->SetKeyMask(input.KeyMask);
+
+    if (input.Touching)
+        Instances[instIdx]->TouchScreen(input.TouchX, input.TouchY);
+    else
+        Instances[instIdx]->ReleaseScreen();
+
+    Instances[instIdx]->SetLidClosed(input.LidClosed != 0);
 }
 
 // ---- Threading ----
 
+// Each console runs its own frames as fast as its inputs allow. There is
+// deliberately NO per-frame barrier between them: DS local wireless needs the
+// guest console to answer the host console *within* a frame, and a barrier
+// parks whichever one finishes first. The guest would sit there while the host
+// burned RecvTimeout on every single exchange, which is what made the game
+// freeze the moment multiplayer started.
+//
+// They stay in step through melonDS's own machinery instead -- LocalMP's
+// semaphores plus Wifi's NextSync, which pace the consoles against each other
+// in *emulated* time. That is the same arrangement melonDS's ordinary
+// two-instance local multiplayer uses, and it works.
 void NetplaySession::InstanceThreadFunc(int instIdx)
 {
     while (ThreadsRunning)
     {
-        // Wait at the barrier for all threads to be ready
-        FrameBarrier->arrive_and_wait();
+        u32 frame = InstanceFrame[instIdx].load(std::memory_order_relaxed);
 
-        if (!ThreadsRunning) break;
+        if (!ReadyForFrame(frame))
+        {
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+            continue;
+        }
 
-        // Run one frame
+        ApplyInput(instIdx, frame);
         InstanceScanlines[instIdx] = Instances[instIdx]->RunFrame();
 
-        // Wait at the barrier for all threads to finish
-        FrameBarrier->arrive_and_wait();
+        // Hash here, between frames, while this console is standing still.
+        // Sampling it from the outside now that the threads free-run would be
+        // reading a moving target and would report a desync every time.
+        if (((frame + 1) % DESYNC_CHECK_INTERVAL) == 0)
+        {
+            InstanceHash[instIdx].store(HashInstance(instIdx), std::memory_order_relaxed);
+            InstanceHashFrame[instIdx].store(frame + 1, std::memory_order_release);
+        }
+
+        InstanceFrame[instIdx].store(frame + 1, std::memory_order_release);
     }
 }
 
@@ -448,12 +469,9 @@ void NetplaySession::StartThreads()
 
     ThreadsRunning = true;
 
-    // Create barrier for (NumInstances + 1) participants:
-    // NumInstances instance threads + 1 main thread
-    FrameBarrier = std::make_unique<SimpleBarrier>(NumInstances + 1);
-
     for (int i = 0; i < NumInstances; i++)
     {
+        InstanceFrame[i].store(CurrentFrame, std::memory_order_relaxed);
         InstanceThreads[i] = std::thread(&NetplaySession::InstanceThreadFunc, this, i);
     }
 
@@ -466,17 +484,11 @@ void NetplaySession::StopThreads()
 
     ThreadsRunning = false;
 
-    // Unblock all threads waiting at the barrier
-    if (FrameBarrier)
-        FrameBarrier->arrive_and_wait();
-
     for (int i = 0; i < NumInstances; i++)
     {
         if (InstanceThreads[i].joinable())
             InstanceThreads[i].join();
     }
-
-    FrameBarrier.reset();
 
     Log(LogLevel::Info, "Netplay: stopped instance threads\n");
 }
@@ -501,39 +513,40 @@ u32 NetplaySession::RunFrame()
 
     u32 t0 = (u32)Platform::GetMSCount();
 
-    // Apply inputs for current frame to all instances
-    ApplyInputs(CurrentFrame);
-
     if (!ThreadsRunning)
-    {
         StartThreads();
+
+    // The consoles run themselves. Pace the frontend off the one we display,
+    // so the window keeps up with the local player's console and the others are
+    // free to lag or lead within whatever LocalMP allows them.
+    u32 target = CurrentFrame + 1;
+    while (ThreadsRunning && Active.load() &&
+           InstanceFrame[LocalPlayerID].load(std::memory_order_acquire) < target)
+    {
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
-
-    // Signal all instance threads to run one frame
-    FrameBarrier->arrive_and_wait();
-
-    // Wait for all instance threads to finish
-    FrameBarrier->arrive_and_wait();
 
     LastFrameMS = (u32)Platform::GetMSCount() - t0;
 
-    // Desync check every DESYNC_CHECK_INTERVAL frames
+    // Desync check every DESYNC_CHECK_INTERVAL frames, using the hashes the
+    // instance threads published between their own frames.
     if (CurrentFrame > 0 && (CurrentFrame % DESYNC_CHECK_INTERVAL) == 0)
     {
-        u64 hash = ComputeStateHash();
-
-        if (Transport.IsConnected())
+        u64 hash = ComputeStateHash(CurrentFrame);
+        if (hash)
         {
-            // Send our hash
-            MsgDesyncAlert msg;
-            msg.Type = Msg_DesyncAlert;
-            msg.Frame = CurrentFrame;
-            msg.Hash = hash;
-            Transport.Broadcast(&msg, sizeof(msg), Chan_Control, true);
-        }
+            if (Transport.IsConnected())
+            {
+                MsgDesyncAlert msg;
+                msg.Type = Msg_DesyncAlert;
+                msg.Frame = CurrentFrame;
+                msg.Hash = hash;
+                Transport.Broadcast(&msg, sizeof(msg), Chan_Control, true);
+            }
 
-        LastStateHash = hash;
-        LastHashFrame = CurrentFrame;
+            LastStateHash = hash;
+            LastHashFrame = CurrentFrame;
+        }
     }
 
     CurrentFrame++;
@@ -560,26 +573,32 @@ NDS* NetplaySession::GetInstance(int idx) const
 
 // ---- Desync detection ----
 
-u64 NetplaySession::ComputeStateHash() const
+u64 NetplaySession::HashInstance(int instIdx) const
 {
+    NDS* nds = Instances[instIdx];
+    if (!nds) return 0;
+
     XXH64_state_t* hashState = XXH64_createState();
     XXH64_reset(hashState, 0);
-
-    for (int i = 0; i < NumInstances; i++)
-    {
-        if (!Instances[i]) continue;
-
-        // Hash main RAM
-        XXH64_update(hashState, Instances[i]->MainRAM, Instances[i]->MainRAMMask + 1);
-
-        // Hash CPU registers
-        XXH64_update(hashState, &Instances[i]->ARM9.R, sizeof(Instances[i]->ARM9.R));
-        XXH64_update(hashState, &Instances[i]->ARM7.R, sizeof(Instances[i]->ARM7.R));
-    }
-
+    XXH64_update(hashState, nds->MainRAM, nds->MainRAMMask + 1);
+    XXH64_update(hashState, &nds->ARM9.R, sizeof(nds->ARM9.R));
+    XXH64_update(hashState, &nds->ARM7.R, sizeof(nds->ARM7.R));
     u64 hash = XXH64_digest(hashState);
     XXH64_freeState(hashState);
     return hash;
+}
+
+// Combined hash for `frame`, or 0 if not every console has reached it yet.
+u64 NetplaySession::ComputeStateHash(u32 frame) const
+{
+    u64 combined = 0;
+    for (int i = 0; i < NumInstances; i++)
+    {
+        if (InstanceHashFrame[i].load(std::memory_order_acquire) != frame)
+            return 0;
+        combined ^= InstanceHash[i].load(std::memory_order_relaxed) * (0x9E3779B97F4A7C15ull + i);
+    }
+    return combined ? combined : 1;
 }
 
 // ---- Network ----

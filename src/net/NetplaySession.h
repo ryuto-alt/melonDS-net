@@ -170,8 +170,9 @@ public:
 
     // ---- Desync detection ----
 
-    // Compute hash of critical state across all instances
-    u64 ComputeStateHash() const;
+    // Combined hash for a frame, built from what each console published
+    // between its own frames. 0 until all of them have reached that frame.
+    u64 ComputeStateHash(u32 frame) const;
 
     // ---- Network ----
 
@@ -241,9 +242,9 @@ private:
     // LocalMP semaphores handle CMD/REPLY sync between instances.
     // A barrier synchronizes frame boundaries.
     std::thread InstanceThreads[kNetplayMaxPlayers];
-    std::unique_ptr<SimpleBarrier> FrameBarrier;
+    std::atomic<u32> InstanceFrame[kNetplayMaxPlayers] = {};  // each console's own frame counter
     u32 InstanceScanlines[kNetplayMaxPlayers] = {};
-    bool ThreadsRunning = false;
+    std::atomic<bool> ThreadsRunning{false};
 
     void InstanceThreadFunc(int instIdx);
     void StartThreads();
@@ -253,6 +254,9 @@ private:
     static constexpr int DESYNC_CHECK_INTERVAL = 60; // every 60 frames (1 sec)
     u64 LastStateHash = 0;
     u32 LastHashFrame = 0;
+    std::atomic<u64> InstanceHash[kNetplayMaxPlayers] = {};
+    std::atomic<u32> InstanceHashFrame[kNetplayMaxPlayers] = {};
+    u64 HashInstance(int instIdx) const;
 
     // ---- Network ----
     NetplayTransport Transport;
@@ -283,7 +287,7 @@ private:
     DisconnectCallback OnDisconnect;
 
     // Apply buffered inputs to all instances for the given frame
-    void ApplyInputs(u32 frame);
+    void ApplyInput(int instIdx, u32 frame);
 
     // Mute audio on non-display instances
     void MuteNonLocalInstances();
