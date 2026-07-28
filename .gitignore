@@ -21,3 +21,6 @@ compile_commands.json
 .vscode
 CMakeFiles
 CMakeCache.txt
+
+melonDS-dist.zip
+melonDS-net-meta/
