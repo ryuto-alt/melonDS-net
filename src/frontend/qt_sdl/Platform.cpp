@@ -68,6 +68,15 @@ static EmuInstance* GetEmuInstance(void* userdata)
     return (EmuInstance*)userdata;
 }
 
+// Netplay mirror instances run their own throwaway copy of the cart and
+// firmware. They share the real EmuInstance for everything else, so any
+// callback that PERSISTS data must refuse them -- otherwise a freshly booted
+// mirror flushes its blank SRAM over the player's actual save file.
+static bool IsMirrorInstance(void* userdata)
+{
+    return ((NetplayInstanceData*)userdata)->Magic == NetplayInstanceData::kMagic;
+}
+
 void SignalStop(StopReason reason, void* userdata)
 {
     EmuInstance* inst = GetEmuInstance(userdata);
@@ -441,6 +450,8 @@ u64 GetUSCount()
 
 void WriteNDSSave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen, void* userdata)
 {
+    if (IsMirrorInstance(userdata)) return;
+
     EmuInstance* inst = GetEmuInstance(userdata);
     if (inst->ndsSave)
         inst->ndsSave->RequestFlush(savedata, savelen, writeoffset, writelen);
@@ -448,6 +459,8 @@ void WriteNDSSave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen
 
 void WriteGBASave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen, void* userdata)
 {
+    if (IsMirrorInstance(userdata)) return;
+
     EmuInstance* inst = GetEmuInstance(userdata);
     if (inst->gbaSave)
         inst->gbaSave->RequestFlush(savedata, savelen, writeoffset, writelen);
@@ -455,6 +468,8 @@ void WriteGBASave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen
 
 void WriteFirmware(const Firmware& firmware, u32 writeoffset, u32 writelen, void* userdata)
 {
+    if (IsMirrorInstance(userdata)) return;
+
     EmuInstance* inst = GetEmuInstance(userdata);
     printf("saving firmware for instance %d\n", inst->getInstanceID());
     if (!inst->firmwareSave)
@@ -488,6 +503,8 @@ void WriteFirmware(const Firmware& firmware, u32 writeoffset, u32 writelen, void
 
 void WriteDateTime(int year, int month, int day, int hour, int minute, int second, void* userdata)
 {
+    if (IsMirrorInstance(userdata)) return;
+
     EmuInstance* inst = GetEmuInstance(userdata);
     QDateTime hosttime = QDateTime::currentDateTime();
     QDateTime time = QDateTime(QDate(year, month, day), QTime(hour, minute, second));
