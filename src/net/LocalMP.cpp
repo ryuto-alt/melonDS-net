@@ -319,7 +319,9 @@ bool LocalMP::WaitForPeers(int inst, u64 clock) noexcept
             if (i == inst || !(mask & (1<<i)))
                 continue;
 
-            u64 peer = Slots[i].Clock.load(std::memory_order_acquire);
+            // Reached(): how far this console has emulated, or how far it has
+            // promised to stay silent -- whichever is further.
+            u64 peer = Slots[i].Reached();
             if (peer < clock)
             {
                 behind = true;
@@ -347,8 +349,11 @@ bool LocalMP::WaitForPeers(int inst, u64 clock) noexcept
         spins++;
 
         // Sub-microsecond waits: the peer is mid-instruction, a hint to the
-        // core beats any trip through the scheduler.
-        if (spins < 4096)
+        // core beats any trip through the scheduler. Keep the budget short --
+        // `pause` costs ~140 cycles on recent cores, so a few hundred already
+        // covers the handoff, and anything longer is better spent letting the
+        // peer have the core.
+        if (spins < 256)
         {
             MP_CPU_PAUSE();
             continue;
@@ -582,8 +587,10 @@ u16 LocalMP::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         // nothing until then (the ack goes out as the window closes), so this
         // is honest -- and without it a client that had fallen behind would sit
         // waiting for this console's clock to move while this console sat
-        // waiting for that same client to reach the deadline.
-        Slots[inst].Advance(deadline);
+        // waiting for that same client to reach the deadline. It goes in the
+        // send horizon, not the clock: the clock is what stamps our outgoing
+        // packets, and pushing that into the future would date them wrongly.
+        Slots[inst].AdvanceHorizon(deadline);
 
         if (!WaitForPeers(inst, deadline))
             return 0;

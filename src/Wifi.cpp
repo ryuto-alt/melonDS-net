@@ -1788,19 +1788,26 @@ void Wifi::USTimer(u32 param)
 
         if (USTimestamp >= NextSync)
         {
-            // Under netplay lockstep, leave NextSync alone: staying parked here
-            // until the host console actually produces its next frame is what
-            // pins the two consoles to each other in *emulated* time, and
-            // CheckRX(2) does that waiting on the host's emulated clock rather
-            // than on wall time. Running on regardless is what let the two
-            // machines drift into completely different games.
-            if (!CheckRX(2) && !Lockstep)
+            // Under lockstep, every one of these asks "has anything arrived by
+            // now?", and answering that makes every other console stop and
+            // emulate up to this exact moment. At one question per 8us tick
+            // that is ~2000 rendezvous a frame per console, which measured out
+            // as most of a core spent spinning.
+            //
+            // So ask on a coarser schedule. NOT a shorter wait -- the wait is
+            // what makes the answer independent of thread timing. The schedule
+            // is pure emulated time, so every machine asks at exactly the same
+            // moments and gets exactly the same answers; the only cost is that
+            // an incoming frame can sit up to kLockstepPollUS unnoticed, the
+            // same amount on every machine. Kept well inside the slack a client
+            // has before its reply slot (~112us after a CMD frame at minimum).
+            if (!CheckRX(2))
             {
                 // Advance NextSync so the emulation keeps running at full
                 // speed.  The background network thread receives packets
                 // asynchronously, so we just need periodic queue checks.
                 // 1024us (~1ms) balances responsiveness with low overhead.
-                NextSync = USTimestamp + 1024;
+                NextSync = USTimestamp + (Lockstep ? kLockstepPollUS : 1024);
             }
         }
     }

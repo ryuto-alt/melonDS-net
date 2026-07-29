@@ -38,6 +38,9 @@
 #include <QPainter>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QProgressBar>
+#include <QVBoxLayout>
+#include <QDateTime>
 #include <QMimeData>
 #include <QVector>
 #include <QCommandLineParser>
@@ -291,21 +294,34 @@ static void writeLocalVersion(int ver)
     fclose(f);
 }
 
+// Latest released version, without going near the GitHub API.
+//
+// api.github.com allows 60 unauthenticated requests an hour *per IP*. A couple
+// of players on one connection, each launching the emulator a few times while
+// testing, burn that in an afternoon -- and then nobody can update at all.
+//
+// github.com/OWNER/REPO/releases/latest is a plain redirect to the tag of the
+// newest release. Asking for it without following the redirect gives the
+// version in the Location header, costs one HEAD request, and is served by the
+// same infrastructure as the download itself: no API, no quota.
 static int checkRemoteVersion()
 {
-    // Use GitHub API releases/latest (no CDN cache, always real-time)
     HINTERNET hSession = WinHttpOpen(L"melonDS-updater/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
     if (!hSession) return -1;
 
     HINTERNET hConnect = WinHttpConnect(hSession,
-        L"api.github.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
+        L"github.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
     if (!hConnect) { WinHttpCloseHandle(hSession); return -1; }
 
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET",
-        L"/repos/ryuto-alt/melonDS-net/releases/latest",
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"HEAD",
+        L"/ryuto-alt/melonDS-net/releases/latest",
         NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
     if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return -1; }
+
+    // The redirect target IS the answer, so do not chase it.
+    DWORD disable = WINHTTP_DISABLE_REDIRECTS;
+    WinHttpSetOption(hRequest, WINHTTP_OPTION_DISABLE_FEATURE, &disable, sizeof(disable));
 
     const wchar_t* headers = L"User-Agent: melonDS-updater/1.0\r\n";
     if (!WinHttpSendRequest(hRequest, headers, -1, NULL, 0, 0, 0) ||
@@ -315,23 +331,106 @@ static int checkRemoteVersion()
         return -1;
     }
 
-    char buf[8192] = {0};
-    DWORD totalRead = 0, bytesRead = 0;
-    while (totalRead < sizeof(buf) - 1 &&
-           WinHttpReadData(hRequest, buf + totalRead, sizeof(buf) - totalRead - 1, &bytesRead) && bytesRead > 0)
-        totalRead += bytesRead;
+    wchar_t location[2048] = {0};
+    DWORD locSize = sizeof(location);
+    BOOL gotLocation = WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_LOCATION, NULL,
+                                           location, &locSize, NULL);
 
     WinHttpCloseHandle(hRequest);
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
 
-    // Parse "tag_name":"v<number>" from JSON response
-    const char* tag = strstr(buf, "\"tag_name\"");
+    if (!gotLocation) return -1;
+
+    // ".../releases/tag/v109"
+    const wchar_t* tag = wcsstr(location, L"/tag/v");
     if (!tag) return -1;
-    const char* v = strchr(tag, 'v');
-    if (!v) return -1;
-    return atoi(v + 1);
+    return _wtoi(tag + 6);
 }
+
+// ---- Update progress window ----
+//
+// Applying an update means a multi-megabyte download and a few hundred files
+// on disk. Without any of that on screen it looks like the emulator hung on
+// startup, so show what is being fetched and how far along it is.
+struct UpdateProgress
+{
+    QWidget* win = nullptr;
+    QLabel* stage = nullptr;
+    QLabel* detail = nullptr;
+    QProgressBar* bar = nullptr;
+
+    void open(int fromVer, int toVer)
+    {
+        win = new QWidget(nullptr, Qt::SplashScreen | Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint);
+        win->setFixedWidth(460);
+        win->setStyleSheet(
+            "QWidget { background-color: #23252b; color: #f0f0f0; font-size: 13px; }"
+            "QLabel#title { font-size: 16px; font-weight: bold; }"
+            "QLabel#detail { color: #9aa0a6; }"
+            "QProgressBar { background-color: #15171b; border: none; height: 10px; border-radius: 5px; }"
+            "QProgressBar::chunk { background-color: #4c8dff; border-radius: 5px; }");
+
+        auto* title = new QLabel(QString("melonDS を更新しています   v%1 → v%2").arg(fromVer).arg(toVer), win);
+        title->setObjectName("title");
+        stage = new QLabel("準備中…", win);
+        detail = new QLabel(" ", win);
+        detail->setObjectName("detail");
+        bar = new QProgressBar(win);
+        bar->setTextVisible(false);
+        bar->setRange(0, 0);   // animated until we know a total
+
+        auto* layout = new QVBoxLayout(win);
+        layout->setContentsMargins(24, 20, 24, 20);
+        layout->setSpacing(10);
+        layout->addWidget(title);
+        layout->addWidget(stage);
+        layout->addWidget(bar);
+        layout->addWidget(detail);
+
+        win->show();
+        pump();
+    }
+
+    void setStage(const QString& text)
+    {
+        if (stage) stage->setText(text);
+        pump();
+    }
+
+    // total <= 0 leaves the bar in its animated "working on it" mode.
+    void setProgress(qint64 cur, qint64 total, const QString& detailText)
+    {
+        if (!win) return;
+        if (total > 0)
+        {
+            if (bar->maximum() == 0) bar->setRange(0, 1000);
+            bar->setValue((int)((cur * 1000) / total));
+        }
+        detail->setText(detailText);
+        pump();
+    }
+
+    void pump()
+    {
+        // Throttled: repainting on every 8KB chunk costs more than the download.
+        static qint64 last = 0;
+        qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (now - last < 33) return;
+        last = now;
+        QApplication::processEvents();
+    }
+
+    void close()
+    {
+        if (!win) return;
+        win->close();
+        delete win;
+        win = nullptr;
+    }
+};
+
+static UpdateProgress updateUI;
 
 static bool downloadRelease(int version)
 {
@@ -407,10 +506,31 @@ static bool downloadRelease(int version)
         return false;
     }
 
-    char dlBuf[8192];
+    // Content-Length is what turns the bar from "working" into a real gauge.
+    qint64 total = 0;
+    {
+        wchar_t lenStr[64] = {0};
+        DWORD lenSize = sizeof(lenStr);
+        if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_CONTENT_LENGTH, NULL, lenStr, &lenSize, NULL))
+            total = _wtoi64(lenStr);
+    }
+
+    updateUI.setStage("ダウンロード中…");
+
+    char dlBuf[65536];
     DWORD bytesRead;
+    qint64 got = 0;
     while (WinHttpReadData(hRequest, dlBuf, sizeof(dlBuf), &bytesRead) && bytesRead > 0)
+    {
         fwrite(dlBuf, 1, bytesRead, f);
+        got += bytesRead;
+
+        QString detail = total > 0
+            ? QString("melonDS-dist.zip   %1 / %2 MB")
+                  .arg(got / 1048576.0, 0, 'f', 1).arg(total / 1048576.0, 0, 'f', 1)
+            : QString("melonDS-dist.zip   %1 MB").arg(got / 1048576.0, 0, 'f', 1);
+        updateUI.setProgress(got, total, detail);
+    }
     fclose(f);
 
     WinHttpCloseHandle(hRequest);
@@ -427,6 +547,29 @@ static void createDirectoryRecursiveW(const std::wstring& path)
     CreateDirectoryW(path.c_str(), NULL);
 }
 
+// Entry count, so the extraction can show real progress instead of a spinner.
+// Reading only headers on a local zip is near-instant.
+static int countZipEntries(const char* zipPath)
+{
+    struct archive* a = archive_read_new();
+    archive_read_support_format_zip(a);
+    archive_read_support_filter_all(a);
+
+    if (archive_read_open_filename(a, zipPath, 10240) != ARCHIVE_OK)
+    {
+        archive_read_free(a);
+        return 0;
+    }
+
+    int n = 0;
+    struct archive_entry* entry;
+    while (archive_read_next_header(a, &entry) == ARCHIVE_OK)
+        n++;
+
+    archive_read_free(a);
+    return n;
+}
+
 static bool extractZipToDir(const char* zipPath, const std::wstring& destDir)
 {
     struct archive* a = archive_read_new();
@@ -441,9 +584,16 @@ static bool extractZipToDir(const char* zipPath, const std::wstring& destDir)
 
     CreateDirectoryW(destDir.c_str(), NULL);
 
+    const int totalEntries = countZipEntries(zipPath);
+    int done = 0;
+
     struct archive_entry* entry;
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK)
     {
+        updateUI.setProgress(++done, totalEntries,
+            QString("%1 / %2   %3").arg(done).arg(totalEntries)
+                .arg(QString::fromUtf8(archive_entry_pathname(entry))));
+
         const char* entryName = archive_entry_pathname(entry);
         int len = MultiByteToWideChar(CP_UTF8, 0, entryName, -1, NULL, 0);
         std::wstring wName(len - 1, 0);
@@ -500,8 +650,12 @@ static void removeDirectoryRecursiveW(const std::wstring& dir)
     RemoveDirectoryW(dir.c_str());
 }
 
-static void copyUpdateFiles(const std::wstring& src, const std::wstring& dst)
+static void copyUpdateFiles(const std::wstring& src, const std::wstring& dst,
+                            int* copied = nullptr, int total = 0)
 {
+    int localCount = 0;
+    if (!copied) copied = &localCount;
+
     WIN32_FIND_DATAW fd;
     HANDLE hFind = FindFirstFileW((src + L"\\*").c_str(), &fd);
     if (hFind == INVALID_HANDLE_VALUE) return;
@@ -515,7 +669,7 @@ static void copyUpdateFiles(const std::wstring& src, const std::wstring& dst)
         {
             if (_wcsicmp(fd.cFileName, L"BIOS") == 0) continue;
             CreateDirectoryW(dstPath.c_str(), NULL);
-            copyUpdateFiles(srcPath, dstPath);
+            copyUpdateFiles(srcPath, dstPath, copied, total);
         }
         else
         {
@@ -526,6 +680,11 @@ static void copyUpdateFiles(const std::wstring& src, const std::wstring& dst)
                 MoveFileW(dstPath.c_str(), (dst + L"\\melonDS.exe.old").c_str());
 
             CopyFileW(srcPath.c_str(), dstPath.c_str(), FALSE);
+
+            (*copied)++;
+            updateUI.setProgress(*copied, total,
+                QString("%1 / %2   %3").arg(*copied).arg(total)
+                    .arg(QString::fromWCharArray(fd.cFileName)));
         }
     } while (FindNextFileW(hFind, &fd));
     FindClose(hFind);
@@ -549,35 +708,37 @@ static void checkForUpdates()
     if (remoteVer <= 0 || remoteVer <= localVer)
         return;
 
-    // Show splash (no dialog, no CMD)
-    QLabel* splash = new QLabel(QString("melonDS \u3092\u66f4\u65b0\u4e2d... (v%1 \u2192 v%2)").arg(localVer).arg(remoteVer));
-    splash->setWindowFlags(Qt::SplashScreen | Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint);
-    splash->setAlignment(Qt::AlignCenter);
-    splash->setFixedSize(350, 80);
-    splash->setStyleSheet("background-color: #2d2d2d; color: white; font-size: 14px; padding: 20px;");
-    splash->show();
-    QApplication::processEvents();
+    updateUI.open(localVer, remoteVer);
+    updateUI.setStage("\u6700\u65b0\u7248\u3092\u78ba\u8a8d\u3057\u307e\u3057\u305f");
 
     if (!downloadRelease(remoteVer))
     {
-        delete splash;
+        updateUI.setStage("\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002\u4eca\u306e\u30d0\u30fc\u30b8\u30e7\u30f3\u3067\u8d77\u52d5\u3057\u307e\u3059\u3002");
+        QApplication::processEvents();
+        Sleep(2500);
+        updateUI.close();
         return;
     }
 
-    splash->setText(QString::fromUtf8("\u66f4\u65b0\u3092\u9069\u7528\u4e2d..."));
-    QApplication::processEvents();
-
     std::wstring tmpDir = exeDir + L"\\_update_tmp";
 
+    updateUI.setStage("\u5c55\u958b\u4e2d\u2026");
     extractZipToDir("_update.zip", tmpDir);
-    copyUpdateFiles(tmpDir, exeDir);
+
+    updateUI.setStage("\u66f4\u65b0\u3092\u9069\u7528\u4e2d\u2026");
+    int copied = 0;
+    copyUpdateFiles(tmpDir, exeDir, &copied, countZipEntries("_update.zip"));
     writeLocalVersion(remoteVer);
 
-    // Cleanup
+    updateUI.setStage("\u5f8c\u7247\u4ed8\u3051\u4e2d\u2026");
+    updateUI.setProgress(0, 0, " ");
     removeDirectoryRecursiveW(tmpDir);
     DeleteFileA("_update.zip");
 
-    delete splash;
+    updateUI.setStage(QString("v%1 \u306b\u66f4\u65b0\u3057\u307e\u3057\u305f\u3002\u518d\u8d77\u52d5\u3057\u307e\u3059\u2026").arg(remoteVer));
+    QApplication::processEvents();
+    Sleep(700);
+    updateUI.close();
 
     // Restart silently
     STARTUPINFOW si = {};

@@ -38,7 +38,10 @@ namespace melonDS
 // So each console publishes its emulated clocks here and LocalMP arbitrates
 // delivery off those instead of off real time. Null outside netplay -- normal
 // same-machine multiplayer keeps the old behaviour.
-struct WifiLockstep
+// alignas: four consoles write their clocks thousands of times a frame and read
+// each other's just as often. Packed together they share cache lines and every
+// read pulls a line another core just dirtied.
+struct alignas(64) WifiLockstep
 {
     // System cycles in one DS frame: the unit Clock counts in.
     static constexpr u64 kFrameCycles = 560190;
@@ -47,6 +50,37 @@ struct WifiLockstep
     // runs: a reader that sees a value strictly greater than T knows the tick
     // at T is over and everything this console sent during it is queued.
     std::atomic<u64> Clock {0};
+
+    // "I transmit nothing stamped before this moment", for the one case where
+    // that is provable: a console parked in an MP reply window, which cannot
+    // transmit until the window closes (see LocalMP::RecvReplies).
+    //
+    // Nothing else may be published here, however plausible. Skipping a wait is
+    // only sound when the promise cannot be broken: the wait is what makes a
+    // peer's queue *final* for the moment being asked about, and without it the
+    // answer depends on whether the peer's thread happened to have sent yet --
+    // real time deciding an emulated outcome. Tried and reverted: the run-ahead
+    // a host grants in its MP acks, and a client's NextSync after one. Both are
+    // hardware hints, not guarantees, and both desynced sessions within
+    // seconds. Ask *less often* instead (see kLockstepPollUS) -- that stays a
+    // function of emulated time, so every machine asks at the same moments.
+    std::atomic<u64> SendHorizon {0};
+
+    void AdvanceHorizon(u64 value)
+    {
+        if (value > SendHorizon.load(std::memory_order_relaxed))
+            SendHorizon.store(value, std::memory_order_release);
+    }
+
+    // The moment before which this console can no longer produce anything --
+    // either because it has already emulated past it, or because it has said
+    // it will not transmit before then.
+    u64 Reached() const
+    {
+        u64 clk = Clock.load(std::memory_order_acquire);
+        u64 hor = SendHorizon.load(std::memory_order_acquire);
+        return hor > clk ? hor : clk;
+    }
 
     // Only ever moves forward. A console parked in an MP reply window publishes
     // the end of that window -- it provably transmits nothing before then, and
@@ -262,6 +296,13 @@ private:
     // so every machine still computes the identical deadline and it is never
     // short. (Same ratio ScheduleTimer uses.)
     static constexpr u64 USToCycles(u64 us) { return (us * 33513982 + 999999) / 1000000; }
+
+    // How often a console waiting for an MP frame asks whether one has arrived,
+    // while netplay lockstep is on. Every question is a rendezvous with every
+    // other console, so the tick rate (8us) is far too fine: it cost ~2000 of
+    // them per frame. A multiple of kTimerInterval, and comfortably inside the
+    // ~112us a client has between a CMD frame and its own reply slot.
+    static const u32 kLockstepPollUS = 32;
 
     bool Enabled;
     bool PowerOn;
