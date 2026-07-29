@@ -19,17 +19,18 @@
 #ifndef LOCALMP_H
 #define LOCALMP_H
 
+#include <atomic>
+
 #include "types.h"
 #include "Platform.h"
 #include "MPInterface.h"
+#include "Wifi.h"
 
 namespace melonDS
 {
 struct MPStatusData
 {
     u16 ConnectedBitmask; // bitmask of which instances are ready to send/receive packets
-    u32 PacketWriteOffset;
-    u32 ReplyWriteOffset;
     u16 MPHostinst; // instance ID from which the last CMD frame was sent
     u16 MPReplyBitmask;   // bitmask of which clients replied in time
 };
@@ -65,20 +66,75 @@ public:
     // moving while frames keep advancing, the game stalled, not the emulator.
     melonDS::u32 GetTrafficCount() const { return TrafficCount; }
 
+    // ---- Netplay lockstep ----
+    // See WifiLockstep in Wifi.h. On: every receive is decided by the other
+    // consoles' emulated clocks, never by a wall-clock timeout, so all machines
+    // running the same mirror consoles see the same wireless traffic.
+    void SetLockstep(bool enable) { Lockstep.store(enable); }
+    WifiLockstep& LockstepSlot(int inst) { return Slots[inst]; }
+
+    // Session frame of a mirror console, published by NetplaySession. This is
+    // the arbitration clock for traffic sent before the consoles have synced
+    // their wifi clocks (beacons, auth/assoc).
+    void SetInstanceFrame(int inst, u32 frame)
+    {
+        Slots[inst].Frame.store(frame, std::memory_order_release);
+    }
+
 private:
-    void FIFORead(int inst, int fifo, void* buf, int len) noexcept;
-    void FIFOWrite(int inst, int fifo, void* buf, int len) noexcept;
     int SendPacketGeneric(int inst, u32 type, u8* packet, int len, u64 timestamp) noexcept;
-    int RecvPacketGeneric(int inst, u8* packet, bool block, u64* timestamp) noexcept;
+    int RecvPacketGeneric(int inst, u8* packet, bool block, u64* timestamp,
+                          u64 maxsenderclock) noexcept;
+
+    // Block until every other console that could still send us something has
+    // emulated strictly past `clock`. Returns false if the wait was abandoned --
+    // session torn down, or the safety cap tripped, which means we desynced and
+    // say so loudly rather than hanging the emulator.
+    bool WaitForPeers(int inst, u64 clock) noexcept;
+
+    std::atomic<bool> Lockstep {false};
+    WifiLockstep Slots[16] {};
+
+    // Grace period on the non-MP queue: a console only accepts traffic that is
+    // already an emulated millisecond old, which turns "is there a packet?"
+    // into a question about the past that every machine answers identically.
+    // Beacons and the auth/assoc handshake are all that travels here and none
+    // of it is timing-critical -- the MP queues get the exact treatment.
+    static constexpr u64 kLockstepLag = 33514;
+
+    // A console that stops running entirely must not hang the emulator. Giving
+    // up here IS a desync, so it is logged as one.
+    static constexpr u64 kLockstepWaitCapMS = 2000;
 
     melonDS::u32 TrafficCount = 0;
 
     Platform::Mutex* MPQueueLock;
     MPStatusData MPStatus {};
-    u8 MPPacketQueue[kPacketQueueSize] {};
-    u8 MPReplyQueue[kReplyQueueSize] {};
-    u32 PacketReadOffset[16] {};
-    u32 ReplyReadOffset[16] {};
+    // One queue per sender, not one shared ring. Two consoles transmitting at
+    // the same emulated moment land in a shared ring in whatever order the two
+    // threads reached the mutex -- and with three or more consoles that order
+    // decides which packet is at the head, which decides whether a reader that
+    // is only allowed to see packets up to time T finds anything at all. That
+    // is a wall-clock input to an emulated decision: with two consoles it never
+    // showed (the only other sender was the peer itself), with three it desyncs
+    // the session outright. Separate queues plus a deterministic pick order
+    // (see PickNext) take real time out of it entirely.
+    u8 MPPacketQueue[16][kPacketQueueSize] {};
+    u8 MPReplyQueue[16][kReplyQueueSize] {};
+    u32 PacketWriteOffset[16] {};
+    u32 ReplyWriteOffset[16] {};
+    u32 PacketReadOffset[16][16] {};   // [reader][sender]
+    u32 ReplyReadOffset[16][16] {};
+
+    // Arrival order, for the non-netplay path where the emulated clocks are not
+    // published and plain FIFO is the right answer.
+    u64 SendSeq = 0;
+
+    void FIFOWrite(int sender, int fifo, const void* buf, int len) noexcept;
+    void FIFORead(int reader, int sender, int fifo, void* buf, int len) noexcept;
+    bool PeekHeader(int reader, int sender, int fifo, MPPacketHeader& hdr) noexcept;
+    void DropQueue(int reader, int sender, int fifo) noexcept;
+    int PickNext(int reader, int fifo, u64 maxsenderclock, MPPacketHeader& out) noexcept;
 
     int LastHostID = -1;
     Platform::Semaphore* SemPool[32] {};

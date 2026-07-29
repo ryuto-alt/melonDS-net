@@ -129,6 +129,20 @@ public:
         OrigUserdata = origUserdata;
     }
 
+    // Recompiler settings the whole session runs on. The host fills these from
+    // its own config; a joining player overwrites them from the session offer
+    // before its instances are built, because JIT settings change instruction
+    // timing and a mismatch desyncs on the first interrupt.
+    struct JITSettings
+    {
+        bool Enable = false;
+        int MaxBlockSize = 32;
+        bool LiteralOpt = true;
+        bool BranchOpt = true;
+        bool FastMemory = true;
+    };
+    JITSettings JITConfig;
+
     // ---- Session lifecycle ----
     // Idle    -- transport up, no peer synced yet
     // Syncing -- handshake / savestate transfer in flight, do NOT run frames
@@ -177,6 +191,14 @@ public:
 
     u32 GetFrameNum() const { return CurrentFrame; }
     int GetLocalPlayerID() const { return LocalPlayerID; }
+
+    // The one mirror console whose SRAM may be flushed to this machine's .sav:
+    // the host's own. It was seeded from that very file and it is what joining
+    // players receive (Blob_SRAM), so it is the only cart in the session that
+    // still matches it. A guest's mirrors run the host's save, not their own.
+    // ponytail: guest-side saves stay dropped -- persisting them would need the
+    // guest's SRAM synced to every peer first, and download play never has one.
+    bool OwnsLocalSave(int inst) const { return HostMode && inst == 0; }
     int GetInputDelay() const { return InputDelay; }
     void SetInputDelay(int delay) { InputDelay = delay; }
 
@@ -206,11 +228,16 @@ public:
 
     // ---- State sync (host -> client) ----
 
-    // Host: send all instance states to a specific client
-    bool HostSendStates(int clientIdx);
+    // Host: snapshot every console once, so all peers get the same world.
+    bool TakeSyncStates(std::vector<std::vector<u8>>& out);
+    void SendSyncStates(int clientIdx, const std::vector<std::vector<u8>>& states);
 
     // Client: receive and apply states from host
     bool ClientReceiveStates();
+
+    // Host, every frame: fill in (and relay) neutral input for seats nobody is
+    // connected to, so the session keeps running with a player short.
+    void SeedAbsentPlayers();
 
     // ---- Session state ----
 
@@ -284,6 +311,19 @@ private:
     static constexpr int DESYNC_CHECK_INTERVAL = 60; // every 60 frames (1 sec)
     u64 LastStateHash = 0;
     u32 LastHashFrame = 0;
+
+    // A few recent checkpoints, so a peer's alert that arrives one checkpoint
+    // out of step still finds ours to compare against. Emu thread only.
+    static constexpr int HASH_HISTORY = 8;
+    u32 HashFrames[HASH_HISTORY] = {};
+    u64 HashValues[HASH_HISTORY] = {};
+    int HashHistPos = 0;
+
+    // Reported in the periodic frame line. "ok" climbing is the only positive
+    // proof the two machines are still running the same game; a run where both
+    // stay at 0 means the check never compared anything, not that all is well.
+    u32 MatchedCheckpoints = 0;
+    u32 MismatchedCheckpoints = 0;
     std::atomic<u64> InstanceHash[kNetplayMaxPlayers] = {};
     std::atomic<u32> InstanceHashFrame[kNetplayMaxPlayers] = {};
     u64 HashInstance(int instIdx) const;
@@ -300,7 +340,12 @@ private:
     u64 ROMHash = 0;
     bool DownloadPlay = true;
     int OfferedPlayers = 2;     // player count the host announced
-    int PendingSyncPeer = -1;   // host: peer waiting to be sent the session state
+    // Host: peers waiting to be sent the session state, one bit each. Any join
+    // re-syncs the whole session, so this only says who still needs the cart.
+    u32 PendingSyncPeers = 0;
+    // ...plus this flag, for "sync whoever is still connected" after a peer
+    // dropped mid-handshake. It is not a peer slot.
+    static constexpr u32 kResyncRemaining = 0x80000000;
     int PendingStartAcks = 0;   // host: clients that got Msg_StartGame but have not acked yet
     int CurBlobIdx = -1;        // which BlobRecv the in-flight chunks belong to
 
@@ -310,7 +355,8 @@ private:
     void* OrigUserdata = nullptr;
     bool RebuildInstances(int numPlayers);
     void DestroyInstances();
-    void HostSyncPeer(int peerIdx);
+    void HostSyncPeers(u32 newPeerMask);
+    void RelayInput(int fromPeer, int playerID, const InputFrame& input);
 
     // Cartless download-play mirrors are reset on join (on every machine, the
     // same way) instead of having their state transferred: the DS-menu console
@@ -344,8 +390,10 @@ private:
     // Apply buffered inputs to all instances for the given frame
     void ApplyInput(int instIdx, u32 frame);
 
-    // Mute audio on non-display instances
-    void MuteNonLocalInstances();
+    // No muting of the mirror consoles: the audio callback only ever reads the
+    // display instance anyway, and writing SPU.SetPowerCnt(0) into a machine-
+    // dependent instance both diverged the emulated state and travelled inside
+    // the savestates -- which is how a joining player ended up with no sound.
 };
 
 }

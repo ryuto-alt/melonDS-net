@@ -358,6 +358,12 @@ void EmuThread::run()
                 // input gaps a disconnecting client leaves behind.
                 if (netplayFreeRun)
                     netplaySession->SeedIdleInputs();
+                else
+                    // Seats nobody is connected to: the host plays them with
+                    // neutral input and ships that input to everyone, so a
+                    // player short does not stall the session and no two
+                    // machines decide the seat went empty on different frames.
+                    netplaySession->SeedAbsentPlayers();
 
                 netplaySession->SendLocalInput(localInput);
                 netplaySession->ProcessNetwork();

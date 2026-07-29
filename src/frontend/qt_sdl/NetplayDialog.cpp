@@ -50,6 +50,30 @@ NetplayStartHostDialog::NetplayStartHostDialog(QWidget* parent) : QDialog(parent
     setAttribute(Qt::WA_DeleteOnClose);
 
     ui->txtPort->setText(QString::number(kNetplayDefaultPort));
+
+    // Not a choice any more: every session seats the maximum (see done()).
+    ui->sbNumPlayers->setValue(kNetplayMaxPlayers);
+    ui->sbNumPlayers->setEnabled(false);
+    ui->label_players->setText("人数: 最大4人");
+    ui->sbNumPlayers->hide();
+
+    // Bring back what was used last time.
+    if (MainWindow* mainWin = (MainWindow*)parent)
+    {
+        if (EmuInstance* inst = mainWin->getEmuInstance())
+        {
+            auto& cfg = inst->getGlobalConfig();
+
+            std::string name = cfg.GetString("Netplay.PlayerName");
+            if (!name.empty()) ui->txtPlayerName->setText(QString::fromStdString(name));
+
+            int delay = cfg.GetInt("Netplay.InputDelay");
+            if (delay > 0) ui->sbInputDelay->setValue(delay);
+
+            int port = cfg.GetInt("Netplay.Port");
+            if (port >= 1024 && port <= 65535) ui->txtPort->setText(QString::number(port));
+        }
+    }
 }
 
 NetplayStartHostDialog::~NetplayStartHostDialog()
@@ -71,7 +95,14 @@ void NetplayStartHostDialog::done(int r)
     if (r == QDialog::Accepted)
     {
         std::string player = ui->txtPlayerName->text().toStdString();
-        int numPlayers = ui->sbNumPlayers->value();
+        // Always open every seat. The mirror consoles have to exist before
+        // anybody connects (they are what a joiner's savestate is loaded into),
+        // so a session that was started "for 2" could never take a third player
+        // -- and the only symptom was a connection timeout on the other end.
+        // Four idle DS-menu consoles cost some CPU and nothing else: a console
+        // sitting in the menu never powers its wifi on, so it adds no wireless
+        // traffic and nothing to synchronize until somebody is actually there.
+        int numPlayers = kNetplayMaxPlayers;
         int inputDelay = ui->sbInputDelay->value();
         int port = ui->txtPort->text().toInt();
 
@@ -194,8 +225,11 @@ void NetplayStartClientDialog::done(int r)
         }
 
         // No ROM needed on this side: the host sends its cart and firmware, and
-        // the consoles are built from those once they arrive.
-        if (!inst->getEmuThread()->netplayStart(1, 2, 4))
+        // the consoles are built from those once they arrive. Seat count and
+        // player ID are placeholders until the host's offer lands -- but they
+        // have to be big enough to hold the seat we might be given, or a player
+        // assigned seat 3 indexes past the end before the rebuild.
+        if (!inst->getEmuThread()->netplayStart(1, kNetplayMaxPlayers, 4))
         {
             QMessageBox::critical(this, "Error", "Failed to initialize netplay session.");
             return;
@@ -263,8 +297,43 @@ NetplayDialog::NetplayDialog(QWidget* parent, EmuInstance* inst)
         });
 
         session->SetDisconnectCallback([this](int playerID, melonDS::NetplayDisconnectReason reason) {
-            QMetaObject::invokeMethod(this, [this, playerID]() {
-                setStatus(QString("Player %1 disconnected").arg(playerID));
+            QMetaObject::invokeMethod(this, [this, playerID, reason]() {
+                if (closingSession) return;
+
+                setStatus(reason == melonDS::Disconnect_SessionFull
+                          ? QString("セッションが満員です")
+                          : QString("Player %1 disconnected").arg(playerID));
+
+                // For a client, the host leaving IS the end of the session.
+                // Leaving it half-alive -- transport down, session still
+                // active, console still "running" -- is a state nothing else
+                // in the frontend expects, and the next join inherits it.
+                // Tear it down the same way the Disconnect button does.
+                if (!emuInstance || playerID != 0) return;
+
+                melonDS::NetplaySession* s = emuInstance->getNetplaySession();
+                if (!s || s->IsHost()) return;
+
+                closingSession = true;
+
+                // Everything from here on must survive this dialog: close()
+                // schedules it for deletion, and the box below must not be a
+                // modal child of it -- a nested event loop inside this handler
+                // is what let the second disconnect notification re-enter and
+                // free the dialog under the first one.
+                QWidget* owner = parentWidget();
+                bool full = (reason == melonDS::Disconnect_SessionFull);
+
+                emuInstance->getEmuThread()->netplayStop();
+                close();
+
+                if (full && owner)
+                {
+                    QMessageBox* box = new QMessageBox(QMessageBox::Warning, "melonDS",
+                        "このセッションは満員です。", QMessageBox::Ok, owner);
+                    box->setAttribute(Qt::WA_DeleteOnClose);
+                    box->show();
+                }
             }, Qt::QueuedConnection);
         });
     }

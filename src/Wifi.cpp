@@ -1053,15 +1053,28 @@ bool Wifi::ProcessTX(TXSlot* slot, int num)
 
                 MPReplyTimer = 16 + PreambleLen(slot->Rate);
 
+                // TODO: 112 likely includes the ack preamble, which needs adjusted
+                // for long-preamble settings
+                u32 replywindow = 112 + ((10 + IOPORT(W_CmdReplyTime)) * NumClients(MPClientMask));
+
+                // Under lockstep this is the whole answer to "did the clients
+                // reply in time?" -- it is the same moment each client computes
+                // as its own NextSync from the CMD frame, so the host can park
+                // until they have all emulated up to it without deadlocking.
+                if (Lockstep)
+                {
+                    Lockstep->ReplyDeadline.store(
+                        Lockstep->Clock.load(std::memory_order_relaxed) + (u64)replywindow * kCyclesPerUS,
+                        std::memory_order_release);
+                }
+
                 u16 res = 0;
                 if (MPClientMask)
                     res = Platform::MP_RecvReplies(MPClientReplies, USTimestamp, MPClientMask, NDS.UserData);
                 MPClientFail &= ~res;
 
-                // TODO: 112 likely includes the ack preamble, which needs adjusted
-                // for long-preamble settings
                 slot->CurPhase = 2;
-                slot->CurPhaseTime = 112 + ((10 + IOPORT(W_CmdReplyTime)) * NumClients(MPClientMask));
+                slot->CurPhaseTime = replywindow;
 
                 break;
             }
@@ -1752,6 +1765,17 @@ void Wifi::MSTimer()
 
 void Wifi::USTimer(u32 param)
 {
+    // Publish the arbitration clock for this tick before anything runs: a peer
+    // that reads a value strictly greater than X knows the tick at X is over
+    // and everything sent during it is already queued. USTimestamp itself will
+    // not do -- it only advances while the wifi is powered, so two consoles
+    // that switched theirs on at different times cannot compare theirs at all.
+    if (Lockstep)
+    {
+        Lockstep->Advance((u64)Lockstep->Frame.load(std::memory_order_relaxed) * kFrameCycles
+                          + NDS.GetFrameCycles());
+    }
+
     USTimestamp += kTimerInterval;
 
     if (IsMPClient && (!ComStatus))
@@ -1764,7 +1788,13 @@ void Wifi::USTimer(u32 param)
 
         if (USTimestamp >= NextSync)
         {
-            if (!CheckRX(2))
+            // Under netplay lockstep, leave NextSync alone: staying parked here
+            // until the host console actually produces its next frame is what
+            // pins the two consoles to each other in *emulated* time, and
+            // CheckRX(2) does that waiting on the host's emulated clock rather
+            // than on wall time. Running on regardless is what let the two
+            // machines drift into completely different games.
+            if (!CheckRX(2) && !Lockstep)
             {
                 // Advance NextSync so the emulation keeps running at full
                 // speed.  The background network thread receives packets

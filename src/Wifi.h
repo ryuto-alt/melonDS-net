@@ -19,10 +19,66 @@
 #ifndef WIFI_H
 #define WIFI_H
 
+#include <atomic>
+
 #include "Savestate.h"
 
 namespace melonDS
 {
+
+// Netplay lockstep hook.
+//
+// Mirror netplay runs every player's console on every machine and syncs only
+// the inputs, so the emulated wireless between those consoles has to deliver
+// the exact same packets, at the exact same emulated moment, on every machine.
+// LocalMP's wall-clock semaphore timeouts cannot do that: whether a reply
+// "arrived in time" then depends on the OS scheduler, and the two machines
+// answer differently within seconds.
+//
+// So each console publishes its emulated clocks here and LocalMP arbitrates
+// delivery off those instead of off real time. Null outside netplay -- normal
+// same-machine multiplayer keeps the old behaviour.
+struct WifiLockstep
+{
+    // System cycles in one DS frame: the unit Clock counts in.
+    static constexpr u64 kFrameCycles = 560190;
+
+    // Session frame plus cycles into it, published before every timer tick
+    // runs: a reader that sees a value strictly greater than T knows the tick
+    // at T is over and everything this console sent during it is queued.
+    std::atomic<u64> Clock {0};
+
+    // Only ever moves forward. A console parked in an MP reply window publishes
+    // the end of that window -- it provably transmits nothing before then, and
+    // saying so is what lets the clients it is waiting for keep running instead
+    // of stalling against a frozen host. The next ordinary tick must not then
+    // pull the value back. Written only by the console that owns the slot.
+    void Advance(u64 value)
+    {
+        if (value > Clock.load(std::memory_order_relaxed))
+            Clock.store(value, std::memory_order_release);
+    }
+
+    // Set just before MP_RecvReplies: the emulated moment the MP reply window
+    // closes. The host console parks until every client has run past it.
+    std::atomic<u64> ReplyDeadline {0};
+
+    // Netplay session frame, published by NetplaySession. Used to arbitrate
+    // the non-MP traffic (beacons, auth/assoc) whose consoles have not synced
+    // their wifi clocks yet -- before association, Clock values from different
+    // consoles are not comparable at all.
+    std::atomic<u32> Frame {0};
+
+    // Published the moment a console finishes a frame. The last wifi tick of a
+    // frame lands a few cycles short of its end, so a peer asking about those
+    // last cycles was left waiting for a clock that does not move again until
+    // this console gets its next input -- and on the machine whose displayed
+    // console is the one waiting, that input cannot arrive until the wait ends.
+    // Claiming the whole finished frame is honest (nothing more can be sent
+    // inside it) and breaks that circle.
+    void FrameEnd(u32 frame) { Advance((u64)(frame + 1) * kFrameCycles); }
+};
+
 class WifiAP;
 class NDS;
 class Wifi
@@ -173,6 +229,9 @@ public:
     const u8* GetMAC() const;
     const u8* GetBSSID() const;
 
+    // Set by NetplaySession for the mirror consoles; null everywhere else.
+    WifiLockstep* Lockstep = nullptr;
+
 private:
     melonDS::NDS& NDS;
     u8 RAM[0x2000];
@@ -184,6 +243,12 @@ private:
 
     static const int kTimerInterval = 8;
     static const u32 kTimeCheckMask = ~(kTimerInterval - 1);
+
+    // Lockstep clock units: system cycles. Rounded down on purpose -- the reply
+    // deadline it builds must not land past what the client's own NextSync lets
+    // it reach, or the host would park waiting for a moment nobody arrives at.
+    static const u64 kFrameCycles = WifiLockstep::kFrameCycles;
+    static const u64 kCyclesPerUS = 33;
 
     bool Enabled;
     bool PowerOn;

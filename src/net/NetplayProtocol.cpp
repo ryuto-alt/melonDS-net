@@ -71,7 +71,11 @@ bool NetplayTransport::StartHost(int port, int maxClients)
     addr.host = ENET_HOST_ANY;
     addr.port = port;
 
-    Host = enet_host_create(&addr, maxClients, Chan_MAX, 0, 0);
+    // Listen for the maximum regardless of the session size: a player who
+    // arrives at a full session has to get far enough to be *told* that, and
+    // ENet simply ignores connections past its peer count -- which the joiner
+    // experiences as an unexplained timeout.
+    Host = enet_host_create(&addr, kNetplayMaxPlayers - 1, Chan_MAX, 0, 0);
     if (!Host)
     {
         Log(LogLevel::Error, "Netplay: failed to create ENet host on port %d\n", port);
@@ -80,6 +84,7 @@ bool NetplayTransport::StartHost(int port, int maxClients)
     }
 
     HostMode = true;
+    MaxSlots = std::max(1, std::min(maxClients, kNetplayMaxPlayers - 1));
     NumPeers = 0;
     Connected.store(true);
 
@@ -223,7 +228,7 @@ int NetplayTransport::Poll(const PacketCallback& callback, int timeoutMs)
                 // appending at NumPeers would hand player 2 a rejoiner in a
                 // 2-player session, which has no such instance.
                 int slot = -1;
-                for (int i = 0; i < kNetplayMaxPlayers; i++)
+                for (int i = 0; i < MaxSlots; i++)
                 {
                     if (!Peers[i]) { slot = i; break; }
                 }
@@ -246,7 +251,18 @@ int NetplayTransport::Poll(const PacketCallback& callback, int timeoutMs)
                 }
                 else
                 {
-                    enet_peer_disconnect_now(event.peer, 0);
+                    // Every seat taken. Say so before hanging up, or the player
+                    // just sees a timeout and blames their network.
+                    Log(LogLevel::Info, "Netplay: rejecting peer, session is full (%d seats)\n", MaxSlots);
+
+                    MsgDisconnect msg;
+                    msg.Type = Msg_Disconnect;
+                    msg.Reason = Disconnect_SessionFull;
+                    ENetPacket* pkt = enet_packet_create(&msg, sizeof(msg), ENET_PACKET_FLAG_RELIABLE);
+                    enet_peer_send(event.peer, Chan_Control, pkt);
+                    enet_host_flush(Host);
+
+                    enet_peer_disconnect_later(event.peer, 0);
                 }
             }
             break;

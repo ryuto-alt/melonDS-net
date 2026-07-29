@@ -438,6 +438,12 @@ public: // TODO: Encapsulate the rest of these members
 
     u32 GetPC(u32 cpu) const;
     u64 GetSysClockCycles(int num);
+
+    // Cycles emulated so far inside the frame currently running. Netplay
+    // lockstep pairs this with the session frame number to build a clock that
+    // stays comparable between mirror consoles even when one of them was just
+    // reset while the other resumed from a savestate.
+    u64 GetFrameCycles() const { return SysTimestamp - FrameStartTimestamp; }
     void NocashPrint(u32 cpu, u32 addr, bool appendNewline = true);
 
     void MonitorARM9Jump(u32 addr);

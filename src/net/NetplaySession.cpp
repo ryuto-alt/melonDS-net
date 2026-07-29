@@ -155,6 +155,12 @@ bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder, void* or
             return false;
         }
 
+        // Hand this console its lockstep slot. From here on its wireless traffic
+        // is arbitrated on emulated time instead of on 25ms wall-clock recv
+        // timeouts -- without this the mirror consoles exchange a different set
+        // of packets on every machine and the games drift apart within seconds.
+        Instances[i]->Wifi.Lockstep = &LMP.LockstepSlot(i);
+
         Instances[i]->Reset();
 
         // The frontend clears the RTC's power-lost flag (StatusReg1 bit7) on
@@ -167,12 +173,12 @@ bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder, void* or
         // moment and the RTC state has to stay byte-identical across machines.
         // (Late joiners overwrite this with the host's RTC via savestate.)
         Instances[i]->RTC.SetDateTime(2000, 1, 1, 0, 0, 0);
-
-        // Register this instance with LocalMP
-        LMP.Begin(i);
     }
 
-    MuteNonLocalInstances();
+    // Registering the instances here would be wrong: LocalMP's connected
+    // bitmask is what tells the lockstep waits which consoles can still send
+    // something, and a console that never powers its wifi on would stall every
+    // other one forever. Wifi::UpdatePowerOn calls MP_Begin/MP_End itself.
 
     Log(LogLevel::Info, "Netplay: created %d NDS instances\n", NumInstances);
     return true;
@@ -526,8 +532,17 @@ void NetplaySession::InstanceThreadFunc(int instIdx)
             continue;
         }
 
+        // The lockstep clock is session frame + cycles into it, so the frame
+        // has to be published before the console runs it.
+        LMP.SetInstanceFrame(instIdx, frame);
+
         ApplyInput(instIdx, frame);
         InstanceScanlines[instIdx] = Instances[instIdx]->RunFrame();
+
+        // This console is now parked until its next input, so publish the whole
+        // frame it just finished: a peer still inside that frame would
+        // otherwise wait out LocalMP's 2-second cap on a clock that cannot move.
+        LMP.LockstepSlot(instIdx).FrameEnd(frame);
 
         // Hash here, between frames, while this console is standing still.
         // Sampling it from the outside now that the threads free-run would be
@@ -551,8 +566,13 @@ void NetplaySession::StartThreads()
     for (int i = 0; i < NumInstances; i++)
     {
         InstanceFrame[i].store(CurrentFrame, std::memory_order_relaxed);
-        InstanceThreads[i] = std::thread(&NetplaySession::InstanceThreadFunc, this, i);
+        LMP.SetInstanceFrame(i, CurrentFrame);
     }
+
+    LMP.SetLockstep(true);
+
+    for (int i = 0; i < NumInstances; i++)
+        InstanceThreads[i] = std::thread(&NetplaySession::InstanceThreadFunc, this, i);
 
     Log(LogLevel::Info, "Netplay: started %d instance threads\n", NumInstances);
 }
@@ -562,6 +582,10 @@ void NetplaySession::StopThreads()
     if (!ThreadsRunning) return;
 
     ThreadsRunning = false;
+
+    // Drop lockstep first or this deadlocks: a console waiting for a peer's
+    // emulated clock would wait for a thread that has already left its loop.
+    LMP.SetLockstep(false);
 
     for (int i = 0; i < NumInstances; i++)
     {
@@ -616,6 +640,7 @@ u32 NetplaySession::AlignInstances()
         {
             u32 f = InstanceFrame[i].load(std::memory_order_relaxed);
             if (!ReadyForFrame(f)) break; // cannot happen; never hang here
+            LMP.SetInstanceFrame(i, f);
             ApplyInput(i, f);
             InstanceScanlines[i] = Instances[i]->RunFrame();
             InstanceFrame[i].store(f + 1, std::memory_order_release);
@@ -641,13 +666,14 @@ u32 NetplaySession::RunFrame()
     {
         u32 mp = LMP.GetTrafficCount();
         Log(LogLevel::Info,
-            "Netplay: frame %u | last frame %u ms | MP packets since last report: %u | scanlines %u/%u | h0 %016llX@%u h1 %016llX@%u\n",
+            "Netplay: frame %u | last frame %u ms | MP packets since last report: %u | scanlines %u/%u | h0 %016llX@%u h1 %016llX@%u | sync %u ok / %u bad\n",
             CurrentFrame, LastFrameMS, mp - LastMPTraffic,
             InstanceScanlines[0], InstanceScanlines[NumInstances > 1 ? 1 : 0],
             (unsigned long long)InstanceHash[0].load(std::memory_order_relaxed),
             InstanceHashFrame[0].load(std::memory_order_relaxed),
             (unsigned long long)InstanceHash[NumInstances > 1 ? 1 : 0].load(std::memory_order_relaxed),
-            InstanceHashFrame[NumInstances > 1 ? 1 : 0].load(std::memory_order_relaxed));
+            InstanceHashFrame[NumInstances > 1 ? 1 : 0].load(std::memory_order_relaxed),
+            MatchedCheckpoints, MismatchedCheckpoints);
         LastMPTraffic = mp;
     }
 
@@ -660,32 +686,62 @@ u32 NetplaySession::RunFrame()
     // so the window keeps up with the local player's console and the others are
     // free to lag or lead within whatever LocalMP allows them.
     u32 target = CurrentFrame + 1;
+    const int stageAtStart = Stage.load();
+
     while (ThreadsRunning && Active.load() &&
            InstanceFrame[LocalPlayerID].load(std::memory_order_acquire) < target)
     {
+        // Keep the link serviced while we wait. This thread is the only one
+        // that receives remote input, and the console we are waiting for can
+        // need the NEXT frame's input to get there (its peer console sits at a
+        // frame boundary until then). Not polling here deadlocked the three of
+        // them until LocalMP's 2-second cap fired -- once every few frames
+        // during a download-play transfer, which is what dropped the session to
+        // single-digit fps and then timed the peer out entirely.
+        ProcessNetwork(0);
+
+        // A handshake or teardown may have moved CurrentFrame under us. Leave
+        // without counting this frame; the emu loop comes back through its
+        // syncing branch.
+        if (Stage.load() != stageAtStart)
+            return InstanceScanlines[LocalPlayerID];
+
         std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
 
     LastFrameMS = (u32)Platform::GetMSCount() - t0;
 
-    // Desync check every DESYNC_CHECK_INTERVAL frames, using the hashes the
-    // instance threads published between their own frames.
-    if (CurrentFrame > 0 && (CurrentFrame % DESYNC_CHECK_INTERVAL) == 0)
+    // Desync check, keyed off the newest checkpoint every console has actually
+    // reached -- not off our own frame counter. The mirror consoles never
+    // finish a frame at the same instant, so keying it off CurrentFrame meant
+    // the hashes almost never lined up and the detector sat silent through the
+    // entire desync it exists to catch.
     {
-        u64 hash = ComputeStateHash(CurrentFrame);
-        if (hash)
-        {
-            if (Transport.IsConnected())
-            {
-                MsgDesyncAlert msg;
-                msg.Type = Msg_DesyncAlert;
-                msg.Frame = CurrentFrame;
-                msg.Hash = hash;
-                Transport.Broadcast(&msg, sizeof(msg), Chan_Control, true);
-            }
+        u32 hf = InstanceHashFrame[0].load(std::memory_order_acquire);
+        for (int i = 1; i < NumInstances; i++)
+            hf = std::min(hf, InstanceHashFrame[i].load(std::memory_order_acquire));
 
-            LastStateHash = hash;
-            LastHashFrame = CurrentFrame;
+        if (hf > LastHashFrame)
+        {
+            u64 hash = ComputeStateHash(hf);
+            if (hash)
+            {
+                if (Transport.IsConnected())
+                {
+                    MsgDesyncAlert msg;
+                    msg.Type = Msg_DesyncAlert;
+                    msg.Frame = hf;
+                    msg.Hash = hash;
+                    Transport.Broadcast(&msg, sizeof(msg), Chan_Control, true);
+                }
+
+                HashFrames[HashHistPos] = hf;
+                HashValues[HashHistPos] = hash;
+                HashHistPos = (HashHistPos + 1) % HASH_HISTORY;
+
+                LastStateHash = hash;
+                LastHashFrame = hf;
+            }
         }
     }
 
@@ -774,22 +830,41 @@ bool NetplaySession::HostStart(int port)
         {
             // Sending a multi-megabyte savestate from inside the ENet poll is
             // asking for trouble; queue it and do it right after the poll ends.
-            PendingSyncPeer = peerIdx;
+            PendingSyncPeers |= (1u << peerIdx);
             Stage.store(Stage_Syncing);
         }
         else
         {
-            // Back to waiting: the frame gate and the input wait loop both key
-            // off Stage, and without this they would spin forever on a peer
-            // that is gone.
-            // Also drop any sync still queued for this peer: if it connected
-            // and dropped within the same Poll(), HostSyncPeer would otherwise
-            // run against the dead slot and bump PendingStartAcks for an ack
-            // that can never arrive -- wedging every future join in
-            // Stage_Syncing.
-            PendingSyncPeer = -1;
-            PendingStartAcks = 0;
-            Stage.store(Stage_Idle);
+            // Drop any sync still queued for this peer: if it connected and
+            // dropped within the same Poll(), the sync would otherwise run
+            // against a dead slot and bump PendingStartAcks for an ack that can
+            // never arrive -- wedging every future join in Stage_Syncing.
+            PendingSyncPeers &= ~(1u << peerIdx);
+
+            bool anyLeft = false;
+            for (int p = 0; p < kNetplayMaxPlayers; p++)
+                if (p != peerIdx && Transport.IsPeerConnected(p))
+                    anyLeft = true;
+
+            if (!anyLeft)
+            {
+                // Back to waiting: the frame gate and the input wait loop both
+                // key off Stage, and without this they would spin forever on a
+                // peer that is gone.
+                PendingStartAcks = 0;
+                Stage.store(Stage_Idle);
+            }
+            else if (Stage.load() == Stage_Syncing)
+            {
+                // Mid-handshake: the acks we are still waiting for include this
+                // peer's. Re-run the whole thing for whoever is still here.
+                PendingStartAcks = 0;
+                PendingSyncPeers |= kResyncRemaining;
+            }
+            // Otherwise the session keeps running and SeedAbsentPlayers takes
+            // over the empty seat -- from the host, so every machine sees that
+            // seat go neutral at the very same frame.
+
             NotifyDisconnect(peerIdx + 1, Disconnect_Normal);
         }
     });
@@ -819,46 +894,82 @@ bool NetplaySession::ClientConnect(const char* host, int port, int timeoutMs,
     return true;
 }
 
-// Host side of the handshake: tell the client what session it joined, ship it
-// an identical copy of every instance's state, then start both sides together.
-void NetplaySession::HostSyncPeer(int peerIdx)
+// Host side of the handshake. Everyone in the session re-syncs whenever anyone
+// joins, not just the newcomer: the players already running have to restart
+// their input history from the same frame as the joiner, and the cartless
+// download-play consoles get reset on every machine on every join (a savestate
+// cannot carry them, see ResetCartlessInstance). Re-shipping the states is what
+// makes all of that land identically on every machine.
+//
+// newPeerMask are the peers that have nothing yet -- only they need the cart,
+// firmware and BIOS, which is the expensive part of a join.
+void NetplaySession::HostSyncPeers(u32 newPeerMask)
 {
-    int playerID = peerIdx + 1;
+    u32 peerMask = 0;
+    for (int p = 0; p < kNetplayMaxPlayers; p++)
+        if (Transport.IsPeerConnected(p))
+            peerMask |= (1u << p);
 
-    MsgSessionOffer offer;
-    offer.Type = Msg_SessionOffer;
-    offer.ROMHash = ROMHash;
-    offer.NumPlayers = (u8)NumInstances;
-    offer.InputDelay = (u8)InputDelay;
-    offer.DownloadPlay = DownloadPlay ? 1 : 0;
-    Transport.SendTo(peerIdx, &offer, sizeof(offer), Chan_Control, true);
+    if (!peerMask)
+    {
+        // Everyone left again before we got here.
+        PendingStartAcks = 0;
+        Stage.store(Stage_Idle);
+        return;
+    }
 
-    MsgSessionAccept accept;
-    accept.Type = Msg_SessionAccept;
-    accept.PlayerID = (u8)playerID;
-    Transport.SendTo(peerIdx, &accept, sizeof(accept), Chan_Control, true);
+    Stage.store(Stage_Syncing);
+    PendingStartAcks = 0;
 
-    // The joining player brings nothing but melonDS. Ship it the firmware and
+    for (int p = 0; p < kNetplayMaxPlayers; p++)
+    {
+        if (!(peerMask & (1u << p))) continue;
+
+        MsgSessionOffer offer;
+        offer.Type = Msg_SessionOffer;
+        offer.ROMHash = ROMHash;
+        offer.NumPlayers = (u8)NumInstances;
+        offer.InputDelay = (u8)InputDelay;
+        offer.DownloadPlay = DownloadPlay ? 1 : 0;
+        offer.JITEnable = JITConfig.Enable ? 1 : 0;
+        offer.JITMaxBlockSize = (u8)JITConfig.MaxBlockSize;
+        offer.JITLiteralOpt = JITConfig.LiteralOpt ? 1 : 0;
+        offer.JITBranchOpt = JITConfig.BranchOpt ? 1 : 0;
+        offer.JITFastMemory = JITConfig.FastMemory ? 1 : 0;
+        Transport.SendTo(p, &offer, sizeof(offer), Chan_Control, true);
+
+        MsgSessionAccept accept;
+        accept.Type = Msg_SessionAccept;
+        accept.PlayerID = (u8)(p + 1);
+        Transport.SendTo(p, &accept, sizeof(accept), Chan_Control, true);
+    }
+
+    // A joining player brings nothing but melonDS. Ship it the firmware and
     // BIOS every machine must agree on, then the cart itself. The cart goes
     // last: its arrival is what triggers the client's instance build, so
     // everything the build consumes has to be there first.
-    if (!FirmwareData.empty())
-        BlobTransfer::Send(Transport, peerIdx, Blob_Firmware, FirmwareData.data(), (u32)FirmwareData.size());
+    for (int p = 0; p < kNetplayMaxPlayers; p++)
+    {
+        if (!(newPeerMask & peerMask & (1u << p))) continue;
 
-    if (!BIOS9Data.empty())
-        BlobTransfer::Send(Transport, peerIdx, Blob_BIOS9, BIOS9Data.data(), (u32)BIOS9Data.size());
-    if (!BIOS7Data.empty())
-        BlobTransfer::Send(Transport, peerIdx, Blob_BIOS7, BIOS7Data.data(), (u32)BIOS7Data.size());
+        if (!FirmwareData.empty())
+            BlobTransfer::Send(Transport, p, Blob_Firmware, FirmwareData.data(), (u32)FirmwareData.size());
 
-    BlobTransfer::Send(Transport, peerIdx, Blob_CartROM, ROMData.data(), (u32)ROMData.size());
+        if (!BIOS9Data.empty())
+            BlobTransfer::Send(Transport, p, Blob_BIOS9, BIOS9Data.data(), (u32)BIOS9Data.size());
+        if (!BIOS7Data.empty())
+            BlobTransfer::Send(Transport, p, Blob_BIOS7, BIOS7Data.data(), (u32)BIOS7Data.size());
 
-    // Savestates are only needed if this session already ran. At frame 0 both
-    // sides are a plain reset of the same cart and firmware -- byte-identical
+        BlobTransfer::Send(Transport, p, Blob_CartROM, ROMData.data(), (u32)ROMData.size());
+    }
+
+    // Savestates are only needed if this session already ran. At frame 0 every
+    // machine is a plain reset of the same cart and firmware -- byte-identical
     // already. Skipping them there takes ~38MB off the join. With the host
-    // free-running while it waits, though, the normal case is now frame != 0.
+    // free-running while it waits, though, the normal case is frame != 0.
     if (CurrentFrame == 0)
     {
-        Log(LogLevel::Info, "Netplay: peer %d joined at frame 0, skipping state transfer\n", peerIdx);
+        Log(LogLevel::Info, "Netplay: peers joined at frame 0, skipping state transfer\n");
     }
     else
     {
@@ -868,35 +979,48 @@ void NetplaySession::HostSyncPeer(int peerIdx)
         // are taken from standing-still consoles.
         AlignInstances();
 
-        // The joining peer starts its input history fresh at this frame; ours
-        // still holds the free-run inputs for these very frame numbers. Both
-        // sides must agree: neutral input for the first InputDelay frames.
-        // (The client does the same in its Msg_StartGame handler.)
+        // Every peer starts its input history fresh at this frame; ours still
+        // holds the frames we just ran. All sides must agree: neutral input for
+        // the first InputDelay frames. (Clients do the same in Msg_StartGame.)
         ResetInputBuffers(CurrentFrame);
 
-        if (!HostSendStates(peerIdx))
+        // Taken once and shipped to everyone -- taking them per peer would let
+        // the consoles move in between and hand the peers different worlds.
+        std::vector<std::vector<u8>> states;
+        if (!TakeSyncStates(states))
         {
-            Log(LogLevel::Error, "Netplay: failed to send states to peer %d\n", peerIdx);
+            Log(LogLevel::Error, "Netplay: failed to take sync states\n");
             Stage.store(Stage_Idle);
             return;
         }
+
+        for (int p = 0; p < kNetplayMaxPlayers; p++)
+        {
+            if (!(peerMask & (1u << p))) continue;
+            SendSyncStates(p, states);
+        }
     }
 
-    // Chan_Control is reliable and ordered, so this lands after the last blob.
-    MsgStartGame start;
-    start.Type = Msg_StartGame;
-    start.Frame = CurrentFrame;
-    start.InputDelay = (u8)InputDelay;
-    Transport.SendTo(peerIdx, &start, sizeof(start), Chan_Control, true);
+    for (int p = 0; p < kNetplayMaxPlayers; p++)
+    {
+        if (!(peerMask & (1u << p))) continue;
 
-    Log(LogLevel::Info, "Netplay: peer %d synced as player %d at frame %u\n",
-        peerIdx, playerID, CurrentFrame);
+        // Chan_Control is reliable and ordered, so this lands after the blobs.
+        MsgStartGame start;
+        start.Type = Msg_StartGame;
+        start.Frame = CurrentFrame;
+        start.InputDelay = (u8)InputDelay;
+        Transport.SendTo(p, &start, sizeof(start), Chan_Control, true);
 
-    // Do NOT go to Stage_Running yet: the client still has to receive all of
-    // that, apply it and build its consoles, which can take a while. It sends
-    // Msg_StartAck when done; until then stay in Stage_Syncing (the frontend
-    // keeps drawing and pumping the UI while we wait).
-    PendingStartAcks++;
+        Log(LogLevel::Info, "Netplay: peer %d synced as player %d at frame %u\n",
+            p, p + 1, CurrentFrame);
+
+        // Do NOT go to Stage_Running yet: each client still has to receive all
+        // of that, apply it and build its consoles, which can take a while.
+        // They send Msg_StartAck when done; until every one of them has, stay
+        // in Stage_Syncing (the frontend keeps drawing and pumping the UI).
+        PendingStartAcks++;
+    }
 }
 
 void NetplaySession::ProcessNetwork(int timeoutMs)
@@ -919,11 +1043,11 @@ void NetplaySession::ProcessNetwork(int timeoutMs)
             HandleInputMessage(peerIdx, data, len);
     }, timeoutMs);
 
-    if (HostMode && PendingSyncPeer >= 0)
+    if (HostMode && PendingSyncPeers)
     {
-        int peer = PendingSyncPeer;
-        PendingSyncPeer = -1;
-        HostSyncPeer(peer);
+        u32 newPeers = PendingSyncPeers & ~kResyncRemaining;
+        PendingSyncPeers = 0;
+        HostSyncPeers(newPeers);
     }
 }
 
@@ -934,8 +1058,64 @@ void NetplaySession::SendLocalInput(const InputFrame& input)
 
     MsgInputFrame msg;
     msg.Type = Msg_InputFrame;
+    msg.PlayerID = (u8)LocalPlayerID;
     msg.Input = input;
     Transport.Broadcast(&msg, sizeof(msg), Chan_Input, true);
+}
+
+// Host only. Clients have no link to each other, so every seat's input reaches
+// them through here. `fromPeer` is skipped (it is where the input came from);
+// pass -1 to send to everybody.
+void NetplaySession::RelayInput(int fromPeer, int playerID, const InputFrame& input)
+{
+    if (!HostMode || !Transport.IsConnected())
+        return;
+
+    MsgInputFrame msg;
+    msg.Type = Msg_InputFrame;
+    msg.PlayerID = (u8)playerID;
+    msg.Input = input;
+
+    for (int p = 0; p < kNetplayMaxPlayers; p++)
+    {
+        if (p == fromPeer || !Transport.IsPeerConnected(p))
+            continue;
+        Transport.SendTo(p, &msg, sizeof(msg), Chan_Input, true);
+    }
+}
+
+// Host only. A seat with nobody in it still has to produce input every frame or
+// ReadyForFrame never passes and every console in the session stalls. The host
+// is the single source of truth for those seats -- it seeds them AND relays the
+// same frames it seeded, so no machine has to decide for itself when a player
+// went away (they would each notice at a different frame, which is a desync).
+void NetplaySession::SeedAbsentPlayers()
+{
+    if (!HostMode)
+        return;
+
+    u32 frame = CurrentFrame + (u32)InputDelay;
+
+    for (int p = 1; p < NumInstances; p++)
+    {
+        if (Transport.IsPeerConnected(p - 1))
+            continue;
+
+        InputFrame neutral = {};
+        neutral.FrameNum = frame;
+        neutral.KeyMask = 0xFFF;
+
+        {
+            std::lock_guard<std::mutex> lock(InputMutex);
+            u32 idx = frame % INPUT_BUF_SIZE;
+            if (InputReady[p][idx] && InputBuf[p][idx].FrameNum == frame)
+                continue;
+            InputBuf[p][idx] = neutral;
+            InputReady[p][idx] = true;
+        }
+
+        RelayInput(-1, p, neutral);
+    }
 }
 
 void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
@@ -958,6 +1138,17 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         OfferedPlayers = msg->NumPlayers;
         InputDelay = msg->InputDelay;
         DownloadPlay = (msg->DownloadPlay != 0);
+
+        // Run the host's recompiler settings, not our own: different block
+        // sizes or optimizations mean different instruction timing, and the
+        // two machines part ways on the first interrupt that lands in a
+        // different block.
+        JITConfig.Enable = (msg->JITEnable != 0);
+        JITConfig.MaxBlockSize = msg->JITMaxBlockSize;
+        JITConfig.LiteralOpt = (msg->JITLiteralOpt != 0);
+        JITConfig.BranchOpt = (msg->JITBranchOpt != 0);
+        JITConfig.FastMemory = (msg->JITFastMemory != 0);
+
         Stage.store(Stage_Syncing);
 
         MsgSyncReady ready;
@@ -971,7 +1162,6 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         if (len < sizeof(MsgSessionAccept)) break;
         const MsgSessionAccept* msg = (const MsgSessionAccept*)data;
         LocalPlayerID = msg->PlayerID;
-        MuteNonLocalInstances();
         Log(LogLevel::Info, "Netplay: session accepted, assigned player ID %d\n", msg->PlayerID);
         break;
     }
@@ -1059,6 +1249,11 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
             break;
         }
 
+        // A player already in the session gets this too whenever somebody else
+        // joins -- and unlike a newcomer, its consoles are running. Park them
+        // before anything is loaded into them.
+        StopThreads();
+
         // Joining at frame 0 means the host skipped the state transfer: our
         // freshly reset instances already match it.
         if (msg->Frame != 0 && !ClientReceiveStates())
@@ -1118,14 +1313,27 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         if (len < sizeof(MsgDesyncAlert)) break;
         const MsgDesyncAlert* msg = (const MsgDesyncAlert*)data;
 
-        // Compare with our hash at the same frame
-        if (msg->Frame == LastHashFrame && msg->Hash != LastStateHash)
+        // Compare against our own checkpoint for that frame. Keep a few of
+        // them: the two machines take their checkpoints independently, so an
+        // alert routinely arrives while we have already moved on to the next
+        // one, and comparing only the newest threw those away unexamined.
+        for (int i = 0; i < HASH_HISTORY; i++)
         {
-            Log(LogLevel::Error, "Netplay: DESYNC detected at frame %d! "
-                "Local hash: %016llX, remote hash: %016llX\n",
-                msg->Frame, (unsigned long long)LastStateHash, (unsigned long long)msg->Hash);
+            if (HashFrames[i] != msg->Frame || HashValues[i] == 0)
+                continue;
 
-            NotifyDesync(msg->Frame, LastStateHash, msg->Hash);
+            if (HashValues[i] != msg->Hash)
+            {
+                MismatchedCheckpoints++;
+                Log(LogLevel::Error, "Netplay: DESYNC detected at frame %u! "
+                    "Local hash: %016llX, remote hash: %016llX\n",
+                    msg->Frame, (unsigned long long)HashValues[i], (unsigned long long)msg->Hash);
+
+                NotifyDesync(msg->Frame, HashValues[i], msg->Hash);
+            }
+            else
+                MatchedCheckpoints++;
+            break;
         }
         break;
     }
@@ -1162,14 +1370,23 @@ void NetplaySession::HandleInputMessage(int peerIdx, const u8* data, u32 len)
         if (len < sizeof(MsgInputFrame)) break;
         const MsgInputFrame* msg = (const MsgInputFrame*)data;
 
-        // Determine which player this input belongs to
-        // For host: peerIdx + 1 (clients are players 1, 2, 3)
-        // For client: peerIdx 0 = host = player 0
         int playerID;
         if (HostMode)
+        {
+            // A client only ever speaks for itself: its seat is the slot it
+            // connected on, never what it claims. Then pass it on -- the other
+            // clients have no way to hear it otherwise.
             playerID = peerIdx + 1;
+            RelayInput(peerIdx, playerID, msg->Input);
+        }
         else
-            playerID = 0; // from host
+        {
+            // Everything arrives through the host, tagged with whose seat it
+            // is: our own, we already have.
+            playerID = msg->PlayerID;
+            if (playerID < 0 || playerID >= NumInstances || playerID == LocalPlayerID)
+                break;
+        }
 
         SetRemoteInput(playerID, msg->Input);
         break;
@@ -1186,7 +1403,11 @@ void NetplaySession::HandleInputMessage(int peerIdx, const u8* data, u32 len)
         if (HostMode)
             playerID = peerIdx + 1;
         else
-            playerID = 0;
+        {
+            playerID = msg->PlayerID;
+            if (playerID < 0 || playerID >= NumInstances || playerID == LocalPlayerID)
+                break;
+        }
 
         const InputFrame* frames = (const InputFrame*)(data + sizeof(MsgInputBatch));
         for (int i = 0; i < msg->Count; i++)
@@ -1230,8 +1451,13 @@ bool NetplaySession::IsStateTransferInstance(int i) const
     return !(DownloadPlay && i != 0);
 }
 
-bool NetplaySession::HostSendStates(int clientIdx)
+// Snapshot every console once. Entry i is empty for the instances that are not
+// transferred (the cartless download-play mirrors); those are reset here, and
+// every client resets them too when the start message lands.
+bool NetplaySession::TakeSyncStates(std::vector<std::vector<u8>>& out)
 {
+    out.assign(NumInstances, std::vector<u8>());
+
     for (int i = 0; i < NumInstances; i++)
     {
         if (!IsStateTransferInstance(i))
@@ -1241,15 +1467,11 @@ bool NetplaySession::HostSendStates(int clientIdx)
             continue;
         }
 
-        std::vector<u8> stateData;
-        if (!TakeState(i, stateData))
+        if (!TakeState(i, out[i]))
         {
             Log(LogLevel::Error, "Netplay: failed to take state for instance %d\n", i);
             return false;
         }
-
-        NetplayBlobType blobType = (NetplayBlobType)(Blob_Savestate0 + i);
-        BlobTransfer::Send(Transport, clientIdx, blobType, stateData.data(), (u32)stateData.size());
 
         // Resume from the exact bytes we just shipped. Loading a savestate is
         // not perfectly round-trip identical to having kept running (verified:
@@ -1257,12 +1479,25 @@ bool NetplaySession::HostSendStates(int clientIdx)
         // client loading it, while the host continues from live state). The
         // cure is symmetry: whatever quirks the load path has, every machine
         // must experience the same ones -- so the host reloads its own states
-        // and both sides evolve from identical footing.
-        if (!LoadState(i, stateData.data(), (u32)stateData.size()))
+        // and everyone evolves from identical footing.
+        if (!LoadState(i, out[i].data(), (u32)out[i].size()))
         {
             Log(LogLevel::Error, "Netplay: failed to reload own state for instance %d\n", i);
             return false;
         }
+    }
+
+    return true;
+}
+
+void NetplaySession::SendSyncStates(int clientIdx, const std::vector<std::vector<u8>>& states)
+{
+    for (int i = 0; i < (int)states.size(); i++)
+    {
+        if (states[i].empty()) continue; // cartless: reset on both ends instead
+
+        NetplayBlobType blobType = (NetplayBlobType)(Blob_Savestate0 + i);
+        BlobTransfer::Send(Transport, clientIdx, blobType, states[i].data(), (u32)states[i].size());
     }
 
     // Also send SRAM for instance 0
@@ -1272,8 +1507,6 @@ bool NetplaySession::HostSendStates(int clientIdx)
     {
         BlobTransfer::Send(Transport, clientIdx, Blob_SRAM, sram, sramLen);
     }
-
-    return true;
 }
 
 bool NetplaySession::ClientReceiveStates()
@@ -1345,20 +1578,6 @@ void NetplaySession::NotifyDisconnect(int playerID, NetplayDisconnectReason reas
 {
     std::lock_guard<std::mutex> lock(CallbackMutex);
     if (OnDisconnect) OnDisconnect(playerID, reason);
-}
-
-void NetplaySession::MuteNonLocalInstances()
-{
-    for (int i = 0; i < NumInstances; i++)
-    {
-        if (i != LocalPlayerID && Instances[i])
-        {
-            // Set master volume to 0 to mute audio on non-local instances.
-            // The SPU MasterVolume is applied in the audio mix path.
-            // We write 0 to the SOUNDCNT register's volume field.
-            Instances[i]->SPU.SetPowerCnt(0);
-        }
-    }
 }
 
 }

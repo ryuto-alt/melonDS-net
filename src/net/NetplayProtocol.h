@@ -98,6 +98,7 @@ enum NetplayDisconnectReason : u8
     Disconnect_Normal = 0,
     Disconnect_Desync = 1,
     Disconnect_Error = 2,
+    Disconnect_SessionFull = 3,   // host has no seat left for this player
 };
 
 // ---- Data structures ----
@@ -129,6 +130,15 @@ struct MsgSessionOffer
     u8 InputDelay;
     u8 DownloadPlay; // 1 = only player 0 holds the cart, everyone else boots
                      // the firmware menu and downloads from it, like real hardware
+
+    // Recompiler settings decide instruction timing, so two machines running
+    // different ones diverge on the first interrupt. They are not covered by
+    // the savestates either -- everyone runs the host's.
+    u8 JITEnable;
+    u8 JITMaxBlockSize;
+    u8 JITLiteralOpt;
+    u8 JITBranchOpt;
+    u8 JITFastMemory;
 };
 
 struct MsgSessionAccept
@@ -191,12 +201,18 @@ struct MsgDisconnect
 struct MsgInputFrame
 {
     u8 Type;        // Msg_InputFrame
+    // Whose input this is. Clients only ever talk to the host, so with three
+    // or more players the host relays everyone's input to everyone else and
+    // this is the only thing that says which seat it came from. A client's own
+    // claim is not trusted: the host stamps it from the peer slot it arrived on.
+    u8 PlayerID;
     InputFrame Input;
 };
 
 struct MsgInputBatch
 {
     u8 Type;        // Msg_InputBatch
+    u8 PlayerID;
     u8 Count;
     // followed by InputFrame[Count]
 };
@@ -273,6 +289,10 @@ private:
     ENetHost* Host = nullptr;
     ENetPeer* Peers[kNetplayMaxPlayers] {};
     int NumPeers = 0;
+    // Seats this session actually has. ENet always listens for the maximum, so
+    // that a player arriving at a full session gets told so instead of sitting
+    // through a connection timeout with no explanation.
+    int MaxSlots = kNetplayMaxPlayers - 1;
     bool HostMode = false;
     std::atomic<bool> Connected{false};
 

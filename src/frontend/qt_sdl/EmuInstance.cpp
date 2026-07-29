@@ -845,6 +845,16 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
         return false;
     }
 
+    // The host's settings become the session's; a joining player overwrites
+    // these from the session offer before it builds anything.
+    netplaySession->JITConfig.Enable = globalCfg.GetBool("JIT.Enable");
+    netplaySession->JITConfig.MaxBlockSize = globalCfg.GetInt("JIT.MaxBlockSize");
+    // "Optimisations", with an s -- the old netplay code spelled these with a z
+    // and silently built every mirror console with both optimizations off.
+    netplaySession->JITConfig.LiteralOpt = globalCfg.GetBool("JIT.LiteralOptimisations");
+    netplaySession->JITConfig.BranchOpt = globalCfg.GetBool("JIT.BranchOptimisations");
+    netplaySession->JITConfig.FastMemory = globalCfg.GetBool("JIT.FastMemory");
+
     // Build NDS instances using current config
     auto argsBuilder = [this](int instIdx, const std::vector<u8>& fwdata,
                               const std::vector<u8>& b9data, const std::vector<u8>& b7data) -> NDSArgs {
@@ -903,15 +913,19 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
             std::move(fw),
         };
 
-        auto& jitcfg = globalCfg;
+        // Session-wide, not per-machine: the host announces its recompiler
+        // settings in the session offer and everyone builds their mirror
+        // consoles with those. Different block sizes or optimizations mean
+        // different instruction timing, and lockstep does not survive that.
         #ifdef JIT_ENABLED
-        if (jitcfg.GetBool("JIT.Enable"))
+        const auto& jitcfg = netplaySession->JITConfig;
+        if (jitcfg.Enable)
         {
             JITArgs jitargs;
-            jitargs.MaxBlockSize = jitcfg.GetInt("JIT.MaxBlockSize");
-            jitargs.LiteralOptimizations = jitcfg.GetBool("JIT.LiteralOptimizations");
-            jitargs.BranchOptimizations = jitcfg.GetBool("JIT.BranchOptimizations");
-            jitargs.FastMemory = jitcfg.GetBool("JIT.FastMemory");
+            jitargs.MaxBlockSize = jitcfg.MaxBlockSize;
+            jitargs.LiteralOptimizations = jitcfg.LiteralOpt;
+            jitargs.BranchOptimizations = jitcfg.BranchOpt;
+            jitargs.FastMemory = jitcfg.FastMemory;
             args.JIT = jitargs;
         }
         else
@@ -960,6 +974,12 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
         Platform::Log(Platform::LogLevel::Info,
             "Netplay: generated firmware in use, disabling download play "
             "(every console gets the cart and direct-boots)\n");
+
+        // Say it on screen too. Everyone else's console booting straight into
+        // the game instead of the DS menu looks like a bug, and the only clue
+        // was a line in the log file.
+        osdAddMessage(0xFFFF0000,
+            "No DS BIOS/firmware configured: download play is off, every player boots the cart");
     }
 
     if (!netplaySession->CreateInstances(argsBuilder, this))
@@ -982,6 +1002,17 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
     {
         netplaySession.reset();
         return false;
+    }
+
+    // The mirrors are built from raw ROM bytes, so their cart comes up with a
+    // blank (0xFF) save: the netplay console booted as a brand-new game with
+    // every save file gone. Hand mirror 0 the SRAM the player is actually
+    // running -- it is also what joining players get shipped (Blob_SRAM), so
+    // the whole session stays on the same save.
+    if (const u8* sram = nds->GetNDSSave())
+    {
+        if (NDS* mirror = netplaySession->GetInstance(0))
+            mirror->SetNDSSave(sram, nds->GetNDSSaveLength());
     }
 
     return true;

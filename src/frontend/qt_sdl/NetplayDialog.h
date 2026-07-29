@@ -104,6 +104,11 @@ private:
     Ui::NetplayDialog* ui;
     EmuInstance* emuInstance;
     QTimer* updateTimer;
+
+    // The session can report the link dying more than once (the rejection
+    // message, then ENet noticing the socket closed). The first one closes this
+    // dialog, and WA_DeleteOnClose means the second must not touch it.
+    bool closingSession = false;
 };
 
 #endif // NETPLAYDIALOG_H

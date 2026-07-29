@@ -77,6 +77,16 @@ static bool IsMirrorInstance(void* userdata)
     return ((NetplayInstanceData*)userdata)->Magic == NetplayInstanceData::kMagic;
 }
 
+// ...with one exception: the host's own console runs the player's cart, seeded
+// with the player's save. Blocking that one silently threw away every save made
+// during a netplay session.
+static bool MirrorOwnsSave(void* userdata)
+{
+    NetplayInstanceData* npd = (NetplayInstanceData*)userdata;
+    NetplaySession* session = (NetplaySession*)npd->Session;
+    return session && session->OwnsLocalSave(npd->InstID);
+}
+
 void SignalStop(StopReason reason, void* userdata)
 {
     EmuInstance* inst = GetEmuInstance(userdata);
@@ -450,7 +460,7 @@ u64 GetUSCount()
 
 void WriteNDSSave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen, void* userdata)
 {
-    if (IsMirrorInstance(userdata)) return;
+    if (IsMirrorInstance(userdata) && !MirrorOwnsSave(userdata)) return;
 
     EmuInstance* inst = GetEmuInstance(userdata);
     if (inst->ndsSave)

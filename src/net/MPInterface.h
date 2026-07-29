@@ -41,6 +41,15 @@ struct MPPacketHeader
     u32 Type;       // 0=regular 1=CMD 2=reply 3=ack
     u32 Length;
     u64 Timestamp;
+    // Netplay lockstep only: the sender's arbitration clock (see WifiLockstep).
+    // A receiving console ignores anything stamped later than the emulated
+    // moment it is currently asking about, which is what makes "did this packet
+    // arrive?" the same question on every machine. Zero everywhere else.
+    u64 SenderClock = 0;
+    // Arrival order across all senders. Only used when the lockstep clocks are
+    // not available (ordinary same-machine multiplayer), where plain FIFO is
+    // what the queues used to give and what the timing there relies on.
+    u64 Seq = 0;
 };
 
 class MPInterface
