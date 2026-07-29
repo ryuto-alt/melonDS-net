@@ -23,9 +23,16 @@ if errorlevel 1 (
 :: Copy exe + DLLs to dist folder
 echo [2/4] Updating dist folder...
 copy "%BUILD_DIR%\RyuE.exe" "%DIST_DIR%\" >nul
-:: Installs made before the rename still run melonDS.exe; drop the stale
-:: copy so the updated folder has exactly one binary.
-if exist "%DIST_DIR%\melonDS.exe" del "%DIST_DIR%\melonDS.exe"
+:: Installs made before the rename run melonDS.exe and their (already shipped,
+:: unfixable) updater relaunches whatever it was started as. Ship a tiny stub
+:: under the old name so those installs hand over to RyuE.exe instead of
+:: restarting the pre-rename binary for ever.
+gcc -mwindows -O2 -o "%DIST_DIR%\melonDS.exe" "%~dp0res\legacy_launcher.c" 2>&1
+if errorlevel 1 (
+    echo LEGACY LAUNCHER BUILD FAILED
+    pause
+    exit /b 1
+)
 call :copy_deps "%DIST_DIR%\RyuE.exe"
 if not exist "%DIST_DIR%\platforms" mkdir "%DIST_DIR%\platforms"
 if not exist "%DIST_DIR%\styles" mkdir "%DIST_DIR%\styles"
