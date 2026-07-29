@@ -351,7 +351,7 @@ void EmuSettingsDialog::on_btnFirmwareBrowse_clicked()
 
     if (!Platform::CheckFileWritable(file.toStdString()))
     {
-        QMessageBox::critical(this, "melonDS", "ファームウェアファイルに書き込めません。\nファイル/フォルダの書き込み権限を確認してください。");
+        QMessageBox::critical(this, "RyuE", "ファームウェアファイルに書き込めません。\nファイル/フォルダの書き込み権限を確認してください。");
         return;
     }
 
@@ -413,7 +413,7 @@ void EmuSettingsDialog::on_btnDLDISDBrowse_clicked()
 
     if (!Platform::CheckFileWritable(file.toStdString()))
     {
-        QMessageBox::critical(this, "melonDS", "DLDI SDイメージに書き込めません。\nファイル/フォルダの書き込み権限を確認してください。");
+        QMessageBox::critical(this, "RyuE", "DLDI SDイメージに書き込めません。\nファイル/フォルダの書き込み権限を確認してください。");
         return;
     }
 
@@ -451,7 +451,7 @@ void EmuSettingsDialog::on_btnDSiFirmwareBrowse_clicked()
 
     if (!Platform::CheckFileWritable(file.toStdString()))
     {
-        QMessageBox::critical(this, "melonDS", "DSiファームウェアファイルに書き込めません。\nファイル/フォルダの書き込み権限を確認してください。");
+        QMessageBox::critical(this, "RyuE", "DSiファームウェアファイルに書き込めません。\nファイル/フォルダの書き込み権限を確認してください。");
         return;
     }
 
@@ -472,7 +472,7 @@ void EmuSettingsDialog::on_btnDSiNANDBrowse_clicked()
 
     if (!Platform::CheckFileWritable(file.toStdString()))
     {
-        QMessageBox::critical(this, "melonDS", "DSi NANDイメージに書き込めません。\nファイル/フォルダの書き込み権限を確認してください。");
+        QMessageBox::critical(this, "RyuE", "DSi NANDイメージに書き込めません。\nファイル/フォルダの書き込み権限を確認してください。");
         return;
     }
 
@@ -507,7 +507,7 @@ void EmuSettingsDialog::on_btnDSiSDBrowse_clicked()
 
     if (!Platform::CheckFileWritable(file.toStdString()))
     {
-        QMessageBox::critical(this, "melonDS", "DSi SDイメージに書き込めません。\nファイル/フォルダの書き込み権限を確認してください。");
+        QMessageBox::critical(this, "RyuE", "DSi SDイメージに書き込めません。\nファイル/フォルダの書き込み権限を確認してください。");
         return;
     }
 

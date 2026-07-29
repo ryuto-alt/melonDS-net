@@ -173,6 +173,24 @@ bool NetplaySession::CreateInstances(const NDSArgsBuilder& argsBuilder, void* or
         // moment and the RTC state has to stay byte-identical across machines.
         // (Late joiners overwrite this with the host's RTC via savestate.)
         Instances[i]->RTC.SetDateTime(2000, 1, 1, 0, 0, 0);
+
+        // Every mirror console rasterizes a frame like any other, and a console
+        // built this way gets the software renderer with threading OFF -- the
+        // frontend only ever configured the one console it displays. So three
+        // of the four consoles rasterized 192 scanlines of 3D and 2D inline, on
+        // the thread that publishes their lockstep clock. That clock is frozen
+        // for the whole of it, and every other console sits spinning until it
+        // moves again: one console's rendering stalls the entire session.
+        //
+        // Rendering never touches emulated state (the renderers only write
+        // framebuffers; VRAM display capture is handled inside them either
+        // way), so this needs no agreement between machines.
+        {
+            RendererSettings rs = {};
+            rs.ScaleFactor = 1;
+            rs.Threaded = true;
+            Instances[i]->GetRenderer().SetRenderSettings(rs);
+        }
     }
 
     // Registering the instances here would be wrong: LocalMP's connected

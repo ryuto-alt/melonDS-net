@@ -231,7 +231,7 @@ void CheatsDialog::on_btnImportCheats_clicked()
     importDB = new ARDatabaseDAT(file.toStdString());
     if (importDB->Error)
     {
-        QMessageBox::critical(this, "melonDS",
+        QMessageBox::critical(this, "RyuE",
                               "このチートデータベースファイルを開けません。");
         delete importDB;
         return;
@@ -239,7 +239,7 @@ void CheatsDialog::on_btnImportCheats_clicked()
 
     if (!importDB->FindGameCode(gameCode))
     {
-        QMessageBox::critical(this, "melonDS",
+        QMessageBox::critical(this, "RyuE",
                               "このデータベースには現在のゲームのチートコードが見つかりません。");
         delete importDB;
         return;
@@ -361,7 +361,7 @@ void CheatsDialog::on_btnSaveCode_clicked()
 
     if (ui->txtItemName->text().trimmed().isEmpty())
     {
-        QMessageBox::critical(this, "melonDS", "エラー: 名前が入力されていません。");
+        QMessageBox::critical(this, "RyuE", "エラー: 名前が入力されていません。");
         return;
     }
 
@@ -385,7 +385,7 @@ void CheatsDialog::on_btnSaveCode_clicked()
         auto codeconv = convertCodeInput();
         if (codeconv.empty())
         {
-            QMessageBox::critical(this, "melonDS", "エラー: 入力されたコードが空または無効です。");
+            QMessageBox::critical(this, "RyuE", "エラー: 入力されたコードが空または無効です。");
             return;
         }
 

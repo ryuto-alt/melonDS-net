@@ -95,6 +95,9 @@ fix_interface_includes(PkgConfig::SDL2 PkgConfig::LibArchive)
 add_compile_definitions(ARCHIVE_SUPPORT_ENABLED)
 
 add_executable(melonDS ${SOURCES_QT_SDL})
+# The target keeps its old name (it is referenced all over this file);
+# only the binary that ships is called RyuE.
+set_target_properties(melonDS PROPERTIES OUTPUT_NAME RyuE)
 
 add_subdirectory("../../net"
     ${CMAKE_BINARY_DIR}/net)

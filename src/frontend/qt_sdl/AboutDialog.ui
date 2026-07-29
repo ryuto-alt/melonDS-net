@@ -23,7 +23,7 @@
    </size>
   </property>
   <property name="windowTitle">
-   <string>melonDSについて</string>
+   <string>RyuEについて</string>
   </property>
   <property name="modal">
    <bool>false</bool>
@@ -108,7 +108,7 @@
           </font>
          </property>
          <property name="text">
-          <string>melonDS</string>
+          <string>RyuE</string>
          </property>
         </widget>
        </item>
@@ -131,7 +131,7 @@
           <bool>true</bool>
          </property>
          <property name="text">
-          <string>Arisotura、melonDSチーム、&lt;a href=&quot;https://github.com/melonDS-emu/melonDS/graphs/contributors&quot;&gt;コントリビューター&lt;/a&gt;による開発。</string>
+          <string>melonDS をベースに開発。&lt;br/&gt;元となった melonDS は Arisotura、melonDSチーム、&lt;a href=&quot;https://github.com/melonDS-emu/melonDS/graphs/contributors&quot;&gt;コントリビューター&lt;/a&gt;によるものです。</string>
          </property>
          <property name="openExternalLinks">
           <bool>true</bool>
@@ -162,7 +162,7 @@
           </font>
          </property>
          <property name="text">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;GNU General Public License v3またはそれ以降のバージョンの下でライセンスされています。&lt;/p&gt;&lt;p&gt;melonDSはお持ちのソフトウェアでのみ使用することを目的としています。&lt;/p&gt;&lt;p&gt;Nintendo DSおよびNintendo DSiシステムは任天堂の所有物です。&lt;br /&gt;melonDSおよびmelonDSチームは任天堂と提携しておらず、任天堂から承認されていません。&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;GNU General Public License v3またはそれ以降のバージョンの下でライセンスされています。&lt;/p&gt;&lt;p&gt;RyuEはお持ちのソフトウェアでのみ使用することを目的としています。&lt;/p&gt;&lt;p&gt;Nintendo DSおよびNintendo DSiシステムは任天堂の所有物です。&lt;br /&gt;RyuE、melonDSおよびmelonDSチームは任天堂と提携しておらず、任天堂から承認されていません。&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
          <property name="textFormat">
           <enum>Qt::TextFormat::RichText</enum>

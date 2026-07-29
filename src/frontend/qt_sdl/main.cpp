@@ -360,6 +360,17 @@ struct UpdateProgress
     QLabel* detail = nullptr;
     QProgressBar* bar = nullptr;
 
+    QLabel* title = nullptr;
+
+    void setVersions(int fromVer, int toVer)
+    {
+        if (!title) return;
+        title->setText(toVer > 0
+            ? QString("RyuE を更新しています   v%1 → v%2").arg(fromVer).arg(toVer)
+            : QString("RyuE   v%1").arg(fromVer));
+        pump();
+    }
+
     void open(int fromVer, int toVer)
     {
         win = new QWidget(nullptr, Qt::SplashScreen | Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint);
@@ -371,7 +382,7 @@ struct UpdateProgress
             "QProgressBar { background-color: #15171b; border: none; height: 10px; border-radius: 5px; }"
             "QProgressBar::chunk { background-color: #4c8dff; border-radius: 5px; }");
 
-        auto* title = new QLabel(QString("melonDS を更新しています   v%1 → v%2").arg(fromVer).arg(toVer), win);
+        title = new QLabel(win);
         title->setObjectName("title");
         stage = new QLabel("準備中…", win);
         detail = new QLabel(" ", win);
@@ -388,6 +399,7 @@ struct UpdateProgress
         layout->addWidget(bar);
         layout->addWidget(detail);
 
+        setVersions(fromVer, toVer);
         win->show();
         pump();
     }
@@ -673,11 +685,15 @@ static void copyUpdateFiles(const std::wstring& src, const std::wstring& dst,
         }
         else
         {
+            if (_wcsicmp(fd.cFileName, L"RyuE.toml") == 0) continue;
             if (_wcsicmp(fd.cFileName, L"melonDS.toml") == 0) continue;
             if (_wcsicmp(fd.cFileName, L"version.txt") == 0) continue;
 
-            if (_wcsicmp(fd.cFileName, L"melonDS.exe") == 0)
-                MoveFileW(dstPath.c_str(), (dst + L"\\melonDS.exe.old").c_str());
+            // A running executable cannot be overwritten, only renamed out of
+            // the way; the next launch deletes the leftover.
+            if (_wcsicmp(fd.cFileName, L"RyuE.exe") == 0 ||
+                _wcsicmp(fd.cFileName, L"melonDS.exe") == 0)
+                MoveFileW(dstPath.c_str(), (dstPath + L".old").c_str());
 
             CopyFileW(srcPath.c_str(), dstPath.c_str(), FALSE);
 
@@ -699,17 +715,42 @@ static void checkForUpdates()
     std::wstring exeDir(exePath, lastSlash ? lastSlash : exePath + wcslen(exePath));
     SetCurrentDirectoryW(exeDir.c_str());
 
-    // Cleanup from previous update
+    // Cleanup from previous update (either name -- installs made before the
+    // rename are still called melonDS.exe until their next update).
     DeleteFileW(L"melonDS.exe.old");
+    DeleteFileW(L"RyuE.exe.old");
 
     int localVer = readLocalVersion();
+
+    // Up before the network call, not after: the check itself can take a moment
+    // on a slow link, and a launcher that shows nothing at all leaves you
+    // wondering whether it is checking, stuck, or simply not updating.
+    updateUI.open(localVer, 0);
+    updateUI.setStage("\u66f4\u65b0\u3092\u78ba\u8a8d\u3057\u3066\u3044\u307e\u3059\u2026");
+
     int remoteVer = checkRemoteVersion();
 
-    if (remoteVer <= 0 || remoteVer <= localVer)
+    if (remoteVer <= 0)
+    {
+        updateUI.setStage("\u66f4\u65b0\u3092\u78ba\u8a8d\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002\u4eca\u306e\u30d0\u30fc\u30b8\u30e7\u30f3\u3067\u8d77\u52d5\u3057\u307e\u3059\u3002");
+        QApplication::processEvents();
+        Sleep(1500);
+        updateUI.close();
         return;
+    }
 
-    updateUI.open(localVer, remoteVer);
-    updateUI.setStage("\u6700\u65b0\u7248\u3092\u78ba\u8a8d\u3057\u307e\u3057\u305f");
+    if (remoteVer <= localVer)
+    {
+        updateUI.setStage(QString("\u6700\u65b0\u7248\u3067\u3059 (v%1)").arg(localVer));
+        updateUI.setProgress(1, 1, " ");
+        QApplication::processEvents();
+        Sleep(900);
+        updateUI.close();
+        return;
+    }
+
+    updateUI.setVersions(localVer, remoteVer);
+    updateUI.setStage(QString("\u65b0\u3057\u3044\u30d0\u30fc\u30b8\u30e7\u30f3 v%1 \u304c\u898b\u3064\u304b\u308a\u307e\u3057\u305f").arg(remoteVer));
 
     if (!downloadRelease(remoteVer))
     {
@@ -740,11 +781,24 @@ static void checkForUpdates()
     Sleep(700);
     updateUI.close();
 
-    // Restart silently
+    // Restart silently -- as RyuE.exe if the update just introduced it. An
+    // install made before the rename is running melonDS.exe, and relaunching
+    // that would put it straight back on the old binary while version.txt
+    // already says it is up to date: it would never update again.
+    std::wstring relaunch = exePath;
+    std::wstring renamed = exeDir + L"\\RyuE.exe";
+    if (_wcsicmp(exePath, renamed.c_str()) != 0 &&
+        GetFileAttributesW(renamed.c_str()) != INVALID_FILE_ATTRIBUTES)
+    {
+        // Leave the old binary behind as the leftover the next launch deletes.
+        MoveFileW(exePath, (std::wstring(exePath) + L".old").c_str());
+        relaunch = renamed;
+    }
+
     STARTUPINFOW si = {};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {};
-    CreateProcessW(exePath, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    CreateProcessW(relaunch.c_str(), NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     exit(0);
@@ -809,7 +863,7 @@ int main(int argc, char** argv)
         QString errorStr = "Failed to initialize SDL. This could indicate an issue with your audio driver.\n\nThe error was: ";
         errorStr += err;
 
-        QMessageBox::critical(nullptr, "melonDS", errorStr);
+        QMessageBox::critical(nullptr, "RyuE", errorStr);
         return 1;
     }
 
@@ -820,7 +874,7 @@ int main(int argc, char** argv)
 
     if (!Config::Load())
         QMessageBox::critical(nullptr,
-                              "melonDS",
+                              "RyuE",
                               "Unable to write to config.\nPlease check the write permissions of the folder you placed melonDS in.");
 
 #ifdef _WIN32

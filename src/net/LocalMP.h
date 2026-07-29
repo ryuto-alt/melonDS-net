@@ -77,12 +77,14 @@ public:
     struct WaitStats { melonDS::u64 Calls, Cached, Spins, SpinMS; };
     WaitStats TakeWaitStats()
     {
-        WaitStats s {
-            StatWaitCalls.exchange(0, std::memory_order_relaxed),
-            StatWaitCached.exchange(0, std::memory_order_relaxed),
-            StatWaitSpins.exchange(0, std::memory_order_relaxed),
-            StatWaitSpinMS.exchange(0, std::memory_order_relaxed),
-        };
+        WaitStats s {};
+        for (auto& c : Counters)
+        {
+            s.Calls  += c.Calls;  c.Calls  = 0;
+            s.Cached += c.Cached; c.Cached = 0;
+            s.Spins  += c.Spins;  c.Spins  = 0;
+            s.SpinMS += c.SpinMS; c.SpinMS = 0;
+        }
         return s;
     }
 
@@ -157,21 +159,30 @@ private:
     // common case: it turns thousands of rendezvous a frame into a compare.
     // Only valid while the connected set is unchanged (a console that just
     // powered its wifi on starts behind everyone).
-    // Written and read only by the owning console's own thread.
-    u64 PeerHorizon[16] {};
-    u16 HorizonMask[16] {};
-    bool HorizonValid[16] {};
+    // Written and read only by the owning console's own thread -- one cache
+    // line each, or four consoles updating them thousands of times a frame
+    // spend their time invalidating each other's lines.
+    struct alignas(64) HorizonSlot
+    {
+        u64 Clock = 0;
+        u16 Mask = 0;
+        bool Valid = false;
+    };
+    HorizonSlot Horizon[16] {};
+
+    // Rendezvous counters, same reasoning: per console, never shared, summed
+    // when the frame trace asks for them.
+    struct alignas(64) WaitCounters
+    {
+        u64 Calls = 0, Cached = 0, Spins = 0, SpinMS = 0;
+    };
+    WaitCounters Counters[16] {};
 
     void FIFOWrite(int sender, int fifo, const void* buf, int len) noexcept;
     void FIFORead(int reader, int sender, int fifo, void* buf, int len) noexcept;
     bool PeekHeader(int reader, int sender, int fifo, MPPacketHeader& hdr) noexcept;
     void DropQueue(int reader, int sender, int fifo) noexcept;
     int PickNext(int reader, int fifo, u64 maxsenderclock, MPPacketHeader& out) noexcept;
-
-    std::atomic<melonDS::u64> StatWaitCalls {0};
-    std::atomic<melonDS::u64> StatWaitCached {0};
-    std::atomic<melonDS::u64> StatWaitSpins {0};
-    std::atomic<melonDS::u64> StatWaitSpinMS {0};
 
     int LastHostID = -1;
     Platform::Semaphore* SemPool[32] {};

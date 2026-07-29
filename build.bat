@@ -22,8 +22,11 @@ if errorlevel 1 (
 
 :: Copy exe + DLLs to dist folder
 echo [2/4] Updating dist folder...
-copy "%BUILD_DIR%\melonDS.exe" "%DIST_DIR%\" >nul
-call :copy_deps "%DIST_DIR%\melonDS.exe"
+copy "%BUILD_DIR%\RyuE.exe" "%DIST_DIR%\" >nul
+:: Installs made before the rename still run melonDS.exe; drop the stale
+:: copy so the updated folder has exactly one binary.
+if exist "%DIST_DIR%\melonDS.exe" del "%DIST_DIR%\melonDS.exe"
+call :copy_deps "%DIST_DIR%\RyuE.exe"
 if not exist "%DIST_DIR%\platforms" mkdir "%DIST_DIR%\platforms"
 if not exist "%DIST_DIR%\styles" mkdir "%DIST_DIR%\styles"
 if not exist "%DIST_DIR%\multimedia" mkdir "%DIST_DIR%\multimedia"

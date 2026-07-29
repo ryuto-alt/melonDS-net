@@ -109,7 +109,7 @@ void LocalMP::ResetQueues()
     memset(ReplyWriteOffset, 0, sizeof(ReplyWriteOffset));
     memset(PacketReadOffset, 0, sizeof(PacketReadOffset));
     memset(ReplyReadOffset, 0, sizeof(ReplyReadOffset));
-    memset(HorizonValid, 0, sizeof(HorizonValid));
+    for (auto& h : Horizon) h.Valid = false;
 
     MPStatus.MPReplyBitmask = 0;
     SendSeq = 0;
@@ -289,14 +289,14 @@ bool LocalMP::WaitForPeers(int inst, u64 clock) noexcept
     // ponytail: pause-spin, then yield. Upgrade path if this ever shows up as
     // burn on a small machine: a condition variable per slot, signalled from
     // Advance() -- which costs a broadcast on every wifi tick, so measure first.
-    StatWaitCalls.fetch_add(1, std::memory_order_relaxed);
+    Counters[inst].Calls++;
 
     // Already known to be settled: every peer had reached at least this far the
     // last time we looked, and clocks never go backwards.
-    if (HorizonValid[inst] && HorizonMask[inst] == MPStatus.ConnectedBitmask &&
-        clock <= PeerHorizon[inst])
+    if (Horizon[inst].Valid && Horizon[inst].Mask == MPStatus.ConnectedBitmask &&
+        clock <= Horizon[inst].Clock)
     {
-        StatWaitCached.fetch_add(1, std::memory_order_relaxed);
+        Counters[inst].Cached++;
         return true;
     }
 
@@ -334,14 +334,14 @@ bool LocalMP::WaitForPeers(int inst, u64 clock) noexcept
         {
             // Remember how far ahead everyone actually was, not just that they
             // cleared this one moment.
-            PeerHorizon[inst] = horizon;
-            HorizonMask[inst] = mask;
-            HorizonValid[inst] = true;
+            Horizon[inst].Clock = horizon;
+            Horizon[inst].Mask = mask;
+            Horizon[inst].Valid = true;
 
             if (spins)
             {
-                StatWaitSpins.fetch_add((u64)spins, std::memory_order_relaxed);
-                if (t0) StatWaitSpinMS.fetch_add(Platform::GetMSCount() - t0, std::memory_order_relaxed);
+                Counters[inst].Spins += (u64)spins;
+                if (t0) Counters[inst].SpinMS += Platform::GetMSCount() - t0;
             }
             return true;
         }

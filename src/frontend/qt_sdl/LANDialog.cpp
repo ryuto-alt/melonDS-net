@@ -82,7 +82,7 @@ void LANStartHostDialog::done(int r)
     {
         if (ui->txtPlayerName->text().trimmed().isEmpty())
         {
-            QMessageBox::warning(this, "melonDS", "プレイヤー名を入力してください。");
+            QMessageBox::warning(this, "RyuE", "プレイヤー名を入力してください。");
             return;
         }
 
@@ -93,7 +93,7 @@ void LANStartHostDialog::done(int r)
 
         if (!lan().StartHost(player.c_str(), numplayers, port))
         {
-            QMessageBox::warning(this, "melonDS", "LANゲームの開始に失敗しました。");
+            QMessageBox::warning(this, "RyuE", "LANゲームの開始に失敗しました。");
             return;
         }
 
@@ -101,7 +101,7 @@ void LANStartHostDialog::done(int r)
         {
             if (!lan().UPnPForwardPort(port))
             {
-                QMessageBox::warning(this, "melonDS",
+                QMessageBox::warning(this, "RyuE",
                     "UPnPポート開放に失敗しました。\nルーターがUPnPに対応していないか、無効になっている可能性があります。\n手動でポートを開放してください。");
             }
             else
@@ -111,7 +111,7 @@ void LANStartHostDialog::done(int r)
                 {
                     QString target = QString("%0:%1").arg(addr).arg(port);
                     QGuiApplication::clipboard()->setText(target);
-                    QMessageBox::information(this, "melonDS",
+                    QMessageBox::information(this, "RyuE",
                         QString("インターネット越しの接続先:\n\n    %0\n\n"
                                 "クリップボードにコピーしました。\n"
                                 "別のWi-Fiにいる相手は「LANゲームに参加」→ 直接接続 に貼り付けてください。").arg(target));
@@ -200,14 +200,14 @@ void LANStartClientDialog::onDirectConnect()
 {
     if (ui->txtPlayerName->text().trimmed().isEmpty())
     {
-        QMessageBox::warning(this, "melonDS", "接続前にプレイヤー名を入力してください。");
+        QMessageBox::warning(this, "RyuE", "接続前にプレイヤー名を入力してください。");
         return;
     }
 
     QString host = ui->txtDirectHost->text().trimmed();
     if (host.isEmpty())
     {
-        QMessageBox::warning(this, "melonDS", "ホストアドレスを入力してください。");
+        QMessageBox::warning(this, "RyuE", "ホストアドレスを入力してください。");
         return;
     }
 
@@ -237,7 +237,7 @@ void LANStartClientDialog::onDirectConnect()
     if (!lan().StartClient(player.c_str(), hostname.c_str(), port))
     {
         QString msg = QString("ホスト %0:%1 への接続に失敗しました。").arg(host).arg(port);
-        QMessageBox::warning(this, "melonDS", msg);
+        QMessageBox::warning(this, "RyuE", msg);
         setEnabled(true);
         lan().StartDiscovery();
         return;
@@ -266,7 +266,7 @@ void LANStartClientDialog::done(int r)
     {
         if (ui->txtPlayerName->text().trimmed().isEmpty())
         {
-            QMessageBox::warning(this, "melonDS", "接続前にプレイヤー名を入力してください。");
+            QMessageBox::warning(this, "RyuE", "接続前にプレイヤー名を入力してください。");
             return;
         }
 
@@ -286,7 +286,7 @@ void LANStartClientDialog::done(int r)
         if (!lan().StartClient(player.c_str(), hostname))
         {
             QString msg = QString("ホスト %0 への接続に失敗しました。").arg(QString(hostname));
-            QMessageBox::warning(this, "melonDS", msg);
+            QMessageBox::warning(this, "RyuE", msg);
             setEnabled(true);
             lan().StartDiscovery();
             return;
@@ -401,7 +401,7 @@ void LANDialog::done(int r)
 
     if (showwarning)
     {
-        if (QMessageBox::warning(this, "melonDS", "本当にこのLANゲームを退出しますか？",
+        if (QMessageBox::warning(this, "RyuE", "本当にこのLANゲームを退出しますか？",
                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::No)
             return;
     }

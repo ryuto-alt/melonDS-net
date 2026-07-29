@@ -1,8 +1,8 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
 	<qresource>
-		<file alias="melon-icon">icon/melon_256x256.png</file>
-		<file alias="melon-logo">melon384.png</file>
+		<file alias="melon-icon">icon/ryue_256x256.png</file>
+		<file alias="melon-logo">ryue384.png</file>
 		<file alias="osd-font-fnt">osd_font.fnt</file>
 		<file alias="osd-font-png">osd_font_0.png</file>
 	</qresource>

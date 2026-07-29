@@ -2,7 +2,7 @@
 #define VFT_APP                      0x00000001L
 
 //this will set your .exe icon
-100 ICON MOVEABLE PURE LOADONCALL DISCARDABLE "${CMAKE_SOURCE_DIR}/res/melon.ico"
+100 ICON MOVEABLE PURE LOADONCALL DISCARDABLE "${CMAKE_SOURCE_DIR}/res/ryue.ico"
 
 //include version information in .exe, modify these values to match your needs
 1 VERSIONINFO
@@ -14,14 +14,14 @@ FILETYPE VFT_APP
 	{
 		BLOCK "040904E4"
 		{
-			VALUE "CompanyName", "Melon Factory of Kuribo64"
+			VALUE "CompanyName", "RyuE"
 			VALUE "FileVersion", "${melonDS_VERSION}"
-			VALUE "FileDescription", "melonDS emulator"
-			VALUE "InternalName", "SDnolem"
-			VALUE "LegalCopyright", "2016-2025 melonDS team"
+			VALUE "FileDescription", "RyuE emulator"
+			VALUE "InternalName", "RyuE"
+			VALUE "LegalCopyright", "Based on melonDS, 2016-2025 melonDS team"
 			VALUE "LegalTrademarks", ""
 			VALUE "OriginalFilename", "melonDS.exe"
-			VALUE "ProductName", "melonDS"
+			VALUE "ProductName", "RyuE"
 			VALUE "ProductVersion", "${melonDS_VERSION}"
 		}
 	}

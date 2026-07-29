@@ -260,7 +260,7 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
     showOSD = windowCfg.GetBool("ShowOSD");
 
-    setWindowTitle("melonDS " MELONDS_VERSION);
+    setWindowTitle("RyuE " MELONDS_VERSION);
     setAttribute(Qt::WA_DeleteOnClose);
     setAcceptDrops(true);
     setFocusPolicy(Qt::ClickFocus);
@@ -1017,7 +1017,7 @@ void MainWindow::dropEvent(QDropEvent* event)
     {
         if (!emuThread->bootROM(file, errorstr))
         {
-            QMessageBox::critical(this, "melonDS", errorstr);
+            QMessageBox::critical(this, "RyuE", errorstr);
             return;
         }
 
@@ -1032,7 +1032,7 @@ void MainWindow::dropEvent(QDropEvent* event)
     {
         if (!emuThread->insertCart(file, true, errorstr))
         {
-            QMessageBox::critical(this, "melonDS", errorstr);
+            QMessageBox::critical(this, "RyuE", errorstr);
             return;
         }
 
@@ -1040,7 +1040,7 @@ void MainWindow::dropEvent(QDropEvent* event)
     }
     else
     {
-        QMessageBox::critical(this, "melonDS", "このファイルはDSまたはGBA ROMとして認識できません。");
+        QMessageBox::critical(this, "RyuE", "このファイルはDSまたはGBA ROMとして認識できません。");
         return;
     }
 }
@@ -1091,7 +1091,7 @@ bool MainWindow::verifySetup()
     QString res = emuInstance->verifySetup();
     if (!res.isEmpty())
     {
-         QMessageBox::critical(this, "melonDS", res);
+         QMessageBox::critical(this, "RyuE", res);
          return false;
     }
 
@@ -1115,7 +1115,7 @@ bool MainWindow::preloadROMs(QStringList file, QStringList gbafile, bool boot)
     {
         if (!emuThread->insertCart(gbafile, true, errorstr))
         {
-            QMessageBox::critical(this, "melonDS", errorstr);
+            QMessageBox::critical(this, "RyuE", errorstr);
             return false;
         }
 
@@ -1129,7 +1129,7 @@ bool MainWindow::preloadROMs(QStringList file, QStringList gbafile, bool boot)
         {
             if (!emuThread->bootROM(file, errorstr))
             {
-                QMessageBox::critical(this, "melonDS", errorstr);
+                QMessageBox::critical(this, "RyuE", errorstr);
                 return false;
             }
         }
@@ -1137,7 +1137,7 @@ bool MainWindow::preloadROMs(QStringList file, QStringList gbafile, bool boot)
         {
             if (!emuThread->insertCart(file, false, errorstr))
             {
-                QMessageBox::critical(this, "melonDS", errorstr);
+                QMessageBox::critical(this, "RyuE", errorstr);
                 return false;
             }
         }
@@ -1151,7 +1151,7 @@ bool MainWindow::preloadROMs(QStringList file, QStringList gbafile, bool boot)
     {
         if (!emuThread->bootFirmware(errorstr))
         {
-            QMessageBox::critical(this, "melonDS", errorstr);
+            QMessageBox::critical(this, "RyuE", errorstr);
             return false;
         }
     }
@@ -1173,7 +1173,7 @@ QStringList MainWindow::splitArchivePath(const QString& filename, bool useMember
         const QStringList filenameParts = filename.split('|');
         if (filenameParts.size() > 2)
         {
-            QMessageBox::warning(this, "melonDS", "このパスには'|'が多すぎます。");
+            QMessageBox::warning(this, "RyuE", "このパスには'|'が多すぎます。");
             return {};
         }
 
@@ -1182,14 +1182,14 @@ QStringList MainWindow::splitArchivePath(const QString& filename, bool useMember
             const QString archive = filenameParts.at(0);
             if (!QFileInfo(archive).exists())
             {
-                QMessageBox::warning(this, "melonDS", "このアーカイブは存在しません。");
+                QMessageBox::warning(this, "RyuE", "このアーカイブは存在しません。");
                 return {};
             }
 
             const QString subfile = filenameParts.at(1);
             if (!Archive::ListArchive(archive).contains(subfile))
             {
-                QMessageBox::warning(this, "melonDS", "このアーカイブには指定されたファイルが含まれていません。");
+                QMessageBox::warning(this, "RyuE", "このアーカイブには指定されたファイルが含まれていません。");
                 return {};
             }
 
@@ -1200,7 +1200,7 @@ QStringList MainWindow::splitArchivePath(const QString& filename, bool useMember
 
     if (!QFileInfo(filename).exists())
     {
-        QMessageBox::warning(this, "melonDS", "このROMファイルは存在しません。");
+        QMessageBox::warning(this, "RyuE", "このROMファイルは存在しません。");
         return {};
     }
 
@@ -1226,9 +1226,9 @@ QString MainWindow::pickFileFromArchive(QString archiveFileName)
     if (archiveROMList.size() <= 1)
     {
         if (!archiveROMList.isEmpty() && archiveROMList.at(0) == "OK")
-            QMessageBox::warning(this, "melonDS", "このアーカイブは空です。");
+            QMessageBox::warning(this, "RyuE", "このアーカイブは空です。");
         else
-            QMessageBox::critical(this, "melonDS", "このアーカイブを読み込めません。ファイルが破損しているか、権限がない可能性があります。");
+            QMessageBox::critical(this, "RyuE", "このアーカイブを読み込めません。ファイルが破損しているか、権限がない可能性があります。");
         return QString();
     }
 
@@ -1246,7 +1246,7 @@ QString MainWindow::pickFileFromArchive(QString archiveFileName)
 
     if (archiveROMList.isEmpty())
     {
-        QMessageBox::warning(this, "melonDS", "このアーカイブにはサポートされているROMが含まれていません。");
+        QMessageBox::warning(this, "RyuE", "このアーカイブにはサポートされているROMが含まれていません。");
         return QString();
     }
 
@@ -1255,7 +1255,7 @@ QString MainWindow::pickFileFromArchive(QString archiveFileName)
 
     bool ok;
     const QString toLoad = QInputDialog::getItem(
-        this, "melonDS",
+        this, "RyuE",
         "このアーカイブには複数のファイルが含まれています。読み込むROMを選択してください。",
         archiveROMList.toList(), 0, false, &ok
     );
@@ -1354,7 +1354,7 @@ void MainWindow::onOpenFile()
     QString errorstr;
     if (!emuThread->bootROM(file, errorstr))
     {
-        QMessageBox::critical(this, "melonDS", errorstr);
+        QMessageBox::critical(this, "RyuE", errorstr);
         return;
     }
 
@@ -1467,7 +1467,7 @@ void MainWindow::onClickRecentFile()
     QString errorstr;
     if (!emuThread->bootROM(file, errorstr))
     {
-        QMessageBox::critical(this, "melonDS", errorstr);
+        QMessageBox::critical(this, "RyuE", errorstr);
         return;
     }
 
@@ -1486,7 +1486,7 @@ void MainWindow::onBootFirmware()
     QString errorstr;
     if (!emuThread->bootFirmware(errorstr))
     {
-        QMessageBox::critical(this, "melonDS", errorstr);
+        QMessageBox::critical(this, "RyuE", errorstr);
         return;
     }
 }
@@ -1500,7 +1500,7 @@ void MainWindow::onInsertCart()
     QString errorstr;
     if (!emuThread->insertCart(file, false, errorstr))
     {
-        QMessageBox::critical(this, "melonDS", errorstr);
+        QMessageBox::critical(this, "RyuE", errorstr);
         return;
     }
 
@@ -1522,7 +1522,7 @@ void MainWindow::onInsertGBACart()
     QString errorstr;
     if (!emuThread->insertCart(file, true, errorstr))
     {
-        QMessageBox::critical(this, "melonDS", errorstr);
+        QMessageBox::critical(this, "RyuE", errorstr);
         return;
     }
 
@@ -1537,7 +1537,7 @@ void MainWindow::onInsertGBAAddon()
     QString errorstr;
     if (!emuThread->insertGBAAddon(type, errorstr))
     {
-        QMessageBox::critical(this, "melonDS", errorstr);
+        QMessageBox::critical(this, "RyuE", errorstr);
         return;
     }
 
@@ -1647,14 +1647,14 @@ void MainWindow::onImportSavefile()
 
     if (!Platform::FileExists(path.toStdString()))
     {
-        QMessageBox::critical(this, "melonDS", "指定されたセーブファイルを開けません。");
+        QMessageBox::critical(this, "RyuE", "指定されたセーブファイルを開けません。");
         return;
     }
 
     if (emuThread->emuIsActive())
     {
         if (QMessageBox::warning(this,
-                        "melonDS",
+                        "RyuE",
                         "エミュレーションがリセットされ、現在のセーブファイルが上書きされます。",
                         QMessageBox::Ok, QMessageBox::Cancel) != QMessageBox::Ok)
         {
@@ -1664,7 +1664,7 @@ void MainWindow::onImportSavefile()
 
     if (!emuThread->importSavefile(path))
     {
-        QMessageBox::critical(this, "melonDS", "指定されたセーブファイルをインポートできません。");
+        QMessageBox::critical(this, "RyuE", "指定されたセーブファイルをインポートできません。");
         return;
     }
 }
@@ -1818,7 +1818,7 @@ bool MainWindow::lanWarning(bool host)
             "今LANゲームを"+verb+"すると、すべてのサブインスタンスが閉じられます。\n\n"
             "続行しますか？";
 
-    auto res = QMessageBox::warning(this, "melonDS", msg, QMessageBox::Yes|QMessageBox::No, QMessageBox::No);
+    auto res = QMessageBox::warning(this, "RyuE", msg, QMessageBox::Yes|QMessageBox::No, QMessageBox::No);
     if (res == QMessageBox::No)
         return false;
 

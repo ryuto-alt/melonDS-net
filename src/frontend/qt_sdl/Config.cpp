@@ -39,7 +39,11 @@ namespace Config
 using namespace melonDS;
 
 
-const char* kConfigFile = "melonDS.toml";
+const char* kConfigFile = "RyuE.toml";
+
+// What this emulator was called before the rename. Read once, so an
+// existing install keeps its BIOS paths, key mappings and JIT settings.
+const char* kPreviousNameConfigFile = "melonDS.toml";
 
 const char* kLegacyConfigFile = "melonDS.ini";
 const char* kLegacyUniqueConfigFile = "melonDS.%d.ini";
@@ -789,7 +793,24 @@ bool Load()
     RootTable = toml::value();
 
     if (!Platform::FileExists(cfgpath))
+    {
+        // Inherit the settings from before the rename, if they are there.
+        auto oldpath = Platform::GetLocalFilePath(kPreviousNameConfigFile);
+        if (Platform::FileExists(oldpath))
+        {
+            try
+            {
+                RootTable = toml::parse(std::filesystem::u8path(oldpath));
+                Save();
+                return true;
+            }
+            catch (toml::syntax_error& err)
+            {
+            }
+        }
+
         return LoadLegacy();
+    }
 
     try
     {

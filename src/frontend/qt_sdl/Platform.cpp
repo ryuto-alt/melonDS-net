@@ -352,7 +352,7 @@ void Log(LogLevel level, const char* fmt, ...)
     static FILE* logfile = nullptr;
     if (!logfile)
     {
-        logfile = fopen("melonDS_log.txt", "w");
+        logfile = fopen("RyuE_log.txt", "w");
         if (logfile) setvbuf(logfile, nullptr, _IONBF, 0);
     }
     if (logfile)

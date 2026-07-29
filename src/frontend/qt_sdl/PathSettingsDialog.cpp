@@ -134,7 +134,7 @@ void PathSettingsDialog::on_btnSaveFileBrowse_clicked()
     
     if (!QTemporaryFile(dir).open())
     {
-        QMessageBox::critical(this, "melonDS", errordialog);
+        QMessageBox::critical(this, "RyuE", errordialog);
         return;
     }
 
@@ -151,7 +151,7 @@ void PathSettingsDialog::on_btnSavestateBrowse_clicked()
     
     if (!QTemporaryFile(dir).open())
     {
-        QMessageBox::critical(this, "melonDS", errordialog);
+        QMessageBox::critical(this, "RyuE", errordialog);
         return;
     }
 
@@ -168,7 +168,7 @@ void PathSettingsDialog::on_btnCheatFileBrowse_clicked()
     
     if (!QTemporaryFile(dir).open())
     {
-        QMessageBox::critical(this, "melonDS", errordialog);
+        QMessageBox::critical(this, "RyuE", errordialog);
         return;
     }
 

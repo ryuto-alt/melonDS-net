@@ -144,14 +144,14 @@ void NetplayStartHostDialog::done(int r)
         {
             QString target = QString("%0:%1").arg(QString::fromStdString(extaddr)).arg(port);
             QGuiApplication::clipboard()->setText(target);
-            QMessageBox::information(this, "melonDS",
+            QMessageBox::information(this, "RyuE",
                 QString("インターネット越しの接続先:\n\n    %0\n\n"
                         "クリップボードにコピーしました。\n"
                         "相手は「ネットでダウンロードプレイ (参加)」に貼り付けるだけです。ROMは不要です。").arg(target));
         }
         else
         {
-            QMessageBox::warning(this, "melonDS",
+            QMessageBox::warning(this, "RyuE",
                 QString("UPnPポート開放に失敗しました。\n"
                         "同じLAN内でなら遊べますが、インターネット越しには %0/UDP の手動開放が必要です。").arg(port));
         }
@@ -329,7 +329,7 @@ NetplayDialog::NetplayDialog(QWidget* parent, EmuInstance* inst)
 
                 if (full && owner)
                 {
-                    QMessageBox* box = new QMessageBox(QMessageBox::Warning, "melonDS",
+                    QMessageBox* box = new QMessageBox(QMessageBox::Warning, "RyuE",
                         "このセッションは満員です。", QMessageBox::Ok, owner);
                     box->setAttribute(Qt::WA_DeleteOnClose);
                     box->show();
