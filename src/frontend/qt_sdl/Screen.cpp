@@ -23,6 +23,7 @@
 
 #include <QPaintEvent>
 #include <QPainter>
+#include <QFontMetrics>
 
 #include <QDateTime>
 
@@ -89,36 +90,17 @@ ScreenPanel::ScreenPanel(QWidget* parent) : QWidget(parent)
 
     splashLogo = QPixmap(":/melon-logo");
 
-    // Load BMFont for splash text
-    splashFontLoaded = splashFont.load(":/osd-font-fnt", ":/osd-font-png");
-
     // Splash text strings (UTF-8)
     strncpy(splashText[0].text, "\xe3\x83\x95\xe3\x82\xa1\xe3\x82\xa4\xe3\x83\xab\xe2\x86\x92ROM\xe3\x82\x92\xe9\x96\x8b\xe3\x81\x8f...", 256); // ファイル→ROMを開く...
-    splashText[0].id = 0x80000000;
-    splashText[0].color = 0;
-    splashText[0].rendered = false;
-    splashText[0].rainbowstart = -1;
+    strncpy(splashText[1].text, "Translated by RYUTO", 256);
 
-    strncpy(splashText[1].text, "\xe3\x81\xa7\xe5\xa7\x8b\xe3\x82\x81\xe3\x82\x88\xe3\x81\x86", 256); // で始めよう
-    splashText[1].id = 0x80000001;
-    splashText[1].color = 0;
-    splashText[1].rendered = false;
-    splashText[1].rainbowstart = -1;
-
-    std::string url = MELONDS_URL;
-    int urlpos = url.find("://");
-    urlpos = (urlpos == std::string::npos) ? 0 : urlpos+3;
-    strncpy(splashText[2].text, url.c_str() + urlpos, 256);
-    splashText[2].id = 0x80000002;
-    splashText[2].color = 0;
-    splashText[2].rendered = false;
-    splashText[2].rainbowstart = -1;
-
-    strncpy(splashText[3].text, "Translated by RYUTO", 256);
-    splashText[3].id = 0x80000003;
-    splashText[3].color = 0;
-    splashText[3].rendered = false;
-    splashText[3].rainbowstart = -1;
+    for (int i = 0; i < 2; i++)
+    {
+        splashText[i].id = 0x80000000 + i;
+        splashText[i].color = 0;
+        splashText[i].rendered = false;
+        splashText[i].rainbowstart = -1;
+    }
 }
 
 ScreenPanel::~ScreenPanel()
@@ -692,43 +674,62 @@ void ScreenPanel::osdUpdate()
 
     bool needrecalc = false;
 
-    if (splashFontLoaded && !splashBmRendered)
+    if (!splashRendered)
     {
-        // Use BMFont for splash text (supports Japanese)
-        float scale = 0.75f;
-        int rend = -1;
-        for (int i = 0; i < 4; i++)
-        {
-            int rout = 0;
-            splashBmText[i] = splashFont.renderText(splashText[i].text, 0, true, rend, &rout, scale);
-            splashText[i].bitmap = splashBmText[i];
-            splashText[i].rendered = true;
-            rend = rout;
-        }
-        splashBmRendered = true;
+        splashText[0].bitmap = renderSplashText(splashText[0].text, 26);
+        splashText[1].bitmap = renderSplashText(splashText[1].text, 18);
+        splashText[0].rendered = true;
+        splashText[1].rendered = true;
+        splashRendered = true;
         needrecalc = true;
-    }
-    else if (!splashFontLoaded)
-    {
-        // Fallback: original OSD font (ASCII only)
-        int rainbowinc = -1;
-        for (int i = 0; i < 4; i++)
-        {
-            if (!splashText[i].rendered)
-            {
-                splashText[i].rainbowstart = rainbowinc;
-                osdRenderItem(&splashText[i]);
-                splashText[i].rendered = true;
-                rainbowinc = splashText[i].rainbowend;
-                needrecalc = true;
-            }
-        }
     }
 
     osdMutex.unlock();
 
     if (needrecalc)
         calcSplashLayout();
+}
+
+// The OSD pixel font's kana are unreadable at splash size, so the splash uses a
+// real UI font. Rainbow gradient + drop shadow keep the original look.
+QImage ScreenPanel::renderSplashText(const char* utf8text, int pixelSize)
+{
+    QString text = QString::fromUtf8(utf8text);
+
+    QFont font;
+    font.setFamilies({"Yu Gothic UI", "Meiryo", "Noto Sans CJK JP", "Hiragino Sans", "MS Gothic"});
+    font.setPixelSize(pixelSize);
+    font.setWeight(QFont::DemiBold);
+
+    QFontMetrics fm(font);
+    const int pad = 4;
+    QImage img(fm.horizontalAdvance(text) + pad*2, fm.height() + pad*2, QImage::Format_ARGB32_Premultiplied);
+    if (img.isNull()) return img;
+    img.fill(0);
+
+    QPainter p(&img);
+    p.setFont(font);
+    p.setRenderHint(QPainter::TextAntialiasing);
+
+    int baseline = pad + fm.ascent();
+
+    p.setPen(QColor(0, 0, 0, 224));
+    p.drawText(pad + 1, baseline + 1, text);
+
+    static const QColor rainbow[] = {
+        {0xFF,0x9B,0x9B}, {0xFF,0xFF,0x9B}, {0x9B,0xFF,0x9B},
+        {0x9B,0xFF,0xFF}, {0x9B,0x9B,0xFF}, {0xFF,0x9B,0xFF}, {0xFF,0x9B,0x9B}
+    };
+    QLinearGradient grad(0, 0, img.width(), 0);
+    for (int i = 0; i < 7; i++)
+        grad.setColorAt(i / 6.0, rainbow[i]);
+
+    p.setPen(QPen(QBrush(grad), 1));
+    p.drawText(pad, baseline, text);
+    p.end();
+
+    // the GL path uploads bits() as GL_RGBA
+    return img.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
 }
 
 void ScreenPanel::calcSplashLayout()
@@ -744,42 +745,18 @@ void ScreenPanel::calcSplashLayout()
     int xlogo = (w - kLogoWidth) / 2;
     int ylogo = (h - kLogoWidth) / 2;
 
-    // top text
-    int totalwidth = splashText[0].bitmap.width() + 6 + splashText[1].bitmap.width();
-    if (totalwidth >= w)
-    {
-        // stacked vertically
-        splashPos[0].setX((width() - splashText[0].bitmap.width()) / 2);
-        splashPos[1].setX((width() - splashText[1].bitmap.width()) / 2);
+    // top text, centred in the space above the logo
+    splashPos[0].setX((w - splashText[0].bitmap.width()) / 2);
+    splashPos[0].setY((ylogo - splashText[0].bitmap.height()) / 2);
 
-        int basey = ylogo / 2;
-        splashPos[0].setY(basey - splashText[0].bitmap.height() - 1);
-        splashPos[1].setY(basey + 1);
-    }
-    else
-    {
-        // horizontal
-        splashPos[0].setX((w - totalwidth) / 2);
-        splashPos[1].setX(splashPos[0].x() + splashText[0].bitmap.width() + 6);
-
-        int basey = (ylogo - splashText[0].bitmap.height()) / 2;
-        splashPos[0].setY(basey);
-        splashPos[1].setY(basey);
-    }
-
-    // bottom text (URL)
+    // credit text, centred in the space below the logo
     int bottomArea = h - (ylogo + kLogoWidth);
-    int bottomCenter = ylogo + kLogoWidth + bottomArea / 2;
-    splashPos[2].setX((w - splashText[2].bitmap.width()) / 2);
-    splashPos[2].setY(bottomCenter - splashText[2].bitmap.height() - 2);
-
-    // credit text
-    splashPos[3].setX((w - splashText[3].bitmap.width()) / 2);
-    splashPos[3].setY(bottomCenter + 2);
+    splashPos[1].setX((w - splashText[1].bitmap.width()) / 2);
+    splashPos[1].setY(ylogo + kLogoWidth + (bottomArea - splashText[1].bitmap.height()) / 2);
 
     // logo
-    splashPos[4].setX(xlogo);
-    splashPos[4].setY(ylogo);
+    splashPos[2].setX(xlogo);
+    splashPos[2].setY(ylogo);
 
     osdMutex.unlock();
 }
@@ -869,9 +846,9 @@ void ScreenPanelNative::paintEvent(QPaintEvent* event)
         // splashscreen
         osdMutex.lock();
 
-        painter.drawPixmap(QRect(splashPos[4], QSize(kLogoWidth, kLogoWidth)), splashLogo);
+        painter.drawPixmap(QRect(splashPos[2], QSize(kLogoWidth, kLogoWidth)), splashLogo);
 
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 2; i++)
             painter.drawImage(splashPos[i], splashText[i].bitmap);
 
         osdMutex.unlock();
@@ -1229,13 +1206,13 @@ void ScreenPanelGL::drawScreen()
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
         glBindTexture(GL_TEXTURE_2D, logoTexture);
-        glUniform2i(osdPosULoc, splashPos[4].x(), splashPos[4].y());
+        glUniform2i(osdPosULoc, splashPos[2].x(), splashPos[2].y());
         glUniform2i(osdSizeULoc, kLogoWidth, kLogoWidth);
         glDrawArrays(GL_TRIANGLES, 0, 2*3);
 
         glUniform1f(osdTexScaleULoc, 1.0);
 
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 2; i++)
         {
             OSDItem& item = splashText[i];
 

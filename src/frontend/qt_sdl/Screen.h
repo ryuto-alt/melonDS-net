@@ -33,7 +33,6 @@
 #include "glad/glad.h"
 #include "ScreenLayout.h"
 #include "duckstation/gl/context.h"
-#include "BMFont.h"
 
 
 class MainWindow;
@@ -124,13 +123,9 @@ protected:
     std::deque<OSDItem> osdItems;
 
     QPixmap splashLogo;
-    OSDItem splashText[4];
-    QPoint splashPos[5];
-
-    BMFont splashFont;
-    bool splashFontLoaded = false;
-    QImage splashBmText[4];
-    bool splashBmRendered = false;
+    OSDItem splashText[2];  // 0: "ファイル→ROMを開く...", 1: credit
+    QPoint splashPos[3];    // 2: logo
+    bool splashRendered = false;
 
     void loadConfig();
 
@@ -157,6 +152,7 @@ protected:
 
     void osdUpdate();
 
+    static QImage renderSplashText(const char* utf8text, int pixelSize);
     void calcSplashLayout();
 };
 

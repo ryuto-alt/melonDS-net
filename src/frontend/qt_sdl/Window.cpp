@@ -82,6 +82,7 @@
 #include "CameraManager.h"
 #include "Window.h"
 #include "AboutDialog.h"
+#include "TermsDialog.h"
 
 using namespace melonDS;
 
@@ -662,6 +663,12 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
         }
         {
             QMenu * menu = menubar->addMenu("ヘルプ");
+            actTerms = menu->addAction("利用規約...");
+            connect(actTerms, &QAction::triggered, this, [&]
+            {
+                auto dialog = TermsDialog(this);
+                dialog.exec();
+            });
             actAbout = menu->addAction("バージョン情報...");
             connect(actAbout, &QAction::triggered, this, [&]
             {

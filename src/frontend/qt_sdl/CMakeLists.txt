@@ -34,8 +34,6 @@ set(SOURCES_QT_SDL
     TitleManagerDialog.cpp
     OSD_shaders.h
     font.h
-    BMFont.h
-    BMFont.cpp
     Platform.cpp
     Platform_AAC.cpp
     QPathInput.h
@@ -44,6 +42,8 @@ set(SOURCES_QT_SDL
     AboutDialog.cpp
     AboutDialog.h
     AboutDialog.ui
+    TermsDialog.cpp
+    TermsDialog.h
     ARCodeQDecl.h
 
     ArchiveUtil.h

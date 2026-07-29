@@ -292,6 +292,7 @@ public:
     QAction* actLimitFramerate;
     QAction* actAudioSync;
 
+    QAction* actTerms;
     QAction* actAbout;
 };
 

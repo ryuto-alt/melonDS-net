@@ -62,6 +62,7 @@
 #include "version.h"
 
 #include "Config.h"
+#include "TermsDialog.h"
 
 #include "EmuInstance.h"
 #include "ArchiveUtil.h"
@@ -876,6 +877,10 @@ int main(int argc, char** argv)
         QMessageBox::critical(nullptr,
                               "RyuE",
                               "Unable to write to config.\nPlease check the write permissions of the folder you placed melonDS in.");
+
+    // nothing else runs until the terms have been accepted
+    if (!TermsDialog::requireAcceptance())
+        return 0;
 
 #ifdef _WIN32
     checkForUpdates();
