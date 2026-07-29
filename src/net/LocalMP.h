@@ -54,6 +54,12 @@ public:
     void Begin(int inst);
     void End(int inst);
 
+    // Throw away every queued packet and every read position. Netplay calls
+    // this at each sync barrier: a machine that has been running since the last
+    // session has traffic queued that a machine joining fresh does not, and a
+    // packet one console can still read while another cannot is a desync.
+    void ResetQueues();
+
     int SendPacket(int inst, u8* data, int len, u64 timestamp);
     int RecvPacket(int inst, u8* data, u64* timestamp);
     int SendCmd(int inst, u8* data, int len, u64 timestamp);
@@ -65,6 +71,20 @@ public:
     // Counts packets actually pushed between the local consoles. If this stops
     // moving while frames keep advancing, the game stalled, not the emulator.
     melonDS::u32 GetTrafficCount() const { return TrafficCount; }
+
+    // Rendezvous cost, for the periodic frame trace. Waits that resolved off
+    // the cached horizon cost nothing; the spin count is what burns a core.
+    struct WaitStats { melonDS::u64 Calls, Cached, Spins, SpinMS; };
+    WaitStats TakeWaitStats()
+    {
+        WaitStats s {
+            StatWaitCalls.exchange(0, std::memory_order_relaxed),
+            StatWaitCached.exchange(0, std::memory_order_relaxed),
+            StatWaitSpins.exchange(0, std::memory_order_relaxed),
+            StatWaitSpinMS.exchange(0, std::memory_order_relaxed),
+        };
+        return s;
+    }
 
     // ---- Netplay lockstep ----
     // See WifiLockstep in Wifi.h. On: every receive is decided by the other
@@ -130,11 +150,28 @@ private:
     // published and plain FIFO is the right answer.
     u64 SendSeq = 0;
 
+    // How far every peer had provably got, as last observed by this console.
+    // Clocks only move forward, so once we have seen a minimum H, every later
+    // question about a moment before H is already answered -- no shared reads,
+    // no spinning. Consoles routinely run a frame or more apart, so this is the
+    // common case: it turns thousands of rendezvous a frame into a compare.
+    // Only valid while the connected set is unchanged (a console that just
+    // powered its wifi on starts behind everyone).
+    // Written and read only by the owning console's own thread.
+    u64 PeerHorizon[16] {};
+    u16 HorizonMask[16] {};
+    bool HorizonValid[16] {};
+
     void FIFOWrite(int sender, int fifo, const void* buf, int len) noexcept;
     void FIFORead(int reader, int sender, int fifo, void* buf, int len) noexcept;
     bool PeekHeader(int reader, int sender, int fifo, MPPacketHeader& hdr) noexcept;
     void DropQueue(int reader, int sender, int fifo) noexcept;
     int PickNext(int reader, int fifo, u64 maxsenderclock, MPPacketHeader& out) noexcept;
+
+    std::atomic<melonDS::u64> StatWaitCalls {0};
+    std::atomic<melonDS::u64> StatWaitCached {0};
+    std::atomic<melonDS::u64> StatWaitSpins {0};
+    std::atomic<melonDS::u64> StatWaitSpinMS {0};
 
     int LastHostID = -1;
     Platform::Semaphore* SemPool[32] {};

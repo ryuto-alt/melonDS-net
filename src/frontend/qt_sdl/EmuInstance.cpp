@@ -855,6 +855,14 @@ bool EmuInstance::startNetplaySession(int localPlayerID, int numPlayers, int inp
     netplaySession->JITConfig.BranchOpt = globalCfg.GetBool("JIT.BranchOptimisations");
     netplaySession->JITConfig.FastMemory = globalCfg.GetBool("JIT.FastMemory");
 
+    // A session runs one console per player on every machine, all of them on
+    // the host's recompiler setting. With it off that is four interpreted DS
+    // consoles per PC -- which is what an in-game slowdown to half speed with
+    // the CPU pinned actually was, and nothing on screen said so.
+    if (localPlayerID == 0 && !netplaySession->JITConfig.Enable)
+        osdAddMessage(0xFFFF0000,
+            "JIT recompiler is off: every player's console runs interpreted (Config > Emu settings)");
+
     // Build NDS instances using current config
     auto argsBuilder = [this](int instIdx, const std::vector<u8>& fwdata,
                               const std::vector<u8>& b9data, const std::vector<u8>& b7data) -> NDSArgs {

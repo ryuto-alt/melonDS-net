@@ -239,6 +239,11 @@ public:
     // connected to, so the session keeps running with a player short.
     void SeedAbsentPlayers();
 
+    // Put the emulated wireless back to a known state on every machine at the
+    // same emulated moment (queues, firmware, MP registration). Part of every
+    // join handshake, host and client alike.
+    void ResetWirelessWorld();
+
     // ---- Session state ----
 
     bool IsActive() const { return Active.load(); }
@@ -389,6 +394,10 @@ private:
 
     // Apply buffered inputs to all instances for the given frame
     void ApplyInput(int instIdx, u32 frame);
+
+    // Last logged touch state of the local player's console, so the trace is
+    // one line per press/release instead of one per frame.
+    bool LastLoggedTouch = false;
 
     // No muting of the mirror consoles: the audio callback only ever reads the
     // display instance anyway, and writing SPU.SetPowerCnt(0) into a machine-

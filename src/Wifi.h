@@ -85,6 +85,13 @@ class Wifi
 {
 public:
 
+    // Whether this console's wireless is powered. Netplay needs it to put the
+    // MP registration back in step after a sync: Reset() clears PowerOn without
+    // going through UpdatePowerOn, so the MP layer is never told, and a console
+    // that was reset stays registered on one machine while the same console on
+    // another machine is not -- and that bitmask decides emulated MP outcomes.
+    [[nodiscard]] bool IsPowerOn() const { return PowerOn; }
+
     enum
     {
         W_ID = 0x000,
@@ -248,7 +255,13 @@ private:
     // deadline it builds must not land past what the client's own NextSync lets
     // it reach, or the host would park waiting for a moment nobody arrives at.
     static const u64 kFrameCycles = WifiLockstep::kFrameCycles;
-    static const u64 kCyclesPerUS = 33;
+    // The DS clock is 33.513982 MHz, not 33. Truncating cost ~1.5% on every
+    // window built from it -- the reply deadline came out ten microseconds
+    // early on a full four-player window, and a reply that lands in those ten
+    // microseconds is one the host declares missing. Integer math, rounded up,
+    // so every machine still computes the identical deadline and it is never
+    // short. (Same ratio ScheduleTimer uses.)
+    static constexpr u64 USToCycles(u64 us) { return (us * 33513982 + 999999) / 1000000; }
 
     bool Enabled;
     bool PowerOn;

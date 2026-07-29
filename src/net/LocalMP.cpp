@@ -99,6 +99,28 @@ void LocalMP::End(int inst)
     Mutex_Unlock(MPQueueLock);
 }
 
+void LocalMP::ResetQueues()
+{
+    Mutex_Lock(MPQueueLock);
+
+    memset(MPPacketQueue, 0, sizeof(MPPacketQueue));
+    memset(MPReplyQueue, 0, sizeof(MPReplyQueue));
+    memset(PacketWriteOffset, 0, sizeof(PacketWriteOffset));
+    memset(ReplyWriteOffset, 0, sizeof(ReplyWriteOffset));
+    memset(PacketReadOffset, 0, sizeof(PacketReadOffset));
+    memset(ReplyReadOffset, 0, sizeof(ReplyReadOffset));
+    memset(HorizonValid, 0, sizeof(HorizonValid));
+
+    MPStatus.MPReplyBitmask = 0;
+    SendSeq = 0;
+    LastHostID = -1;
+
+    for (int i = 0; i < 32; i++)
+        Semaphore_Reset(SemPool[i]);
+
+    Mutex_Unlock(MPQueueLock);
+}
+
 void LocalMP::FIFORead(int reader, int sender, int fifo, void* buf, int len) noexcept
 {
     u8* data = (fifo == 0) ? MPPacketQueue[sender] : MPReplyQueue[sender];
@@ -267,6 +289,17 @@ bool LocalMP::WaitForPeers(int inst, u64 clock) noexcept
     // ponytail: pause-spin, then yield. Upgrade path if this ever shows up as
     // burn on a small machine: a condition variable per slot, signalled from
     // Advance() -- which costs a broadcast on every wifi tick, so measure first.
+    StatWaitCalls.fetch_add(1, std::memory_order_relaxed);
+
+    // Already known to be settled: every peer had reached at least this far the
+    // last time we looked, and clocks never go backwards.
+    if (HorizonValid[inst] && HorizonMask[inst] == MPStatus.ConnectedBitmask &&
+        clock <= PeerHorizon[inst])
+    {
+        StatWaitCached.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
     int spins = 0;
     u64 t0 = 0;
 
@@ -277,6 +310,7 @@ bool LocalMP::WaitForPeers(int inst, u64 clock) noexcept
 
         u16 mask = MPStatus.ConnectedBitmask;
         bool behind = false;
+        u64 horizon = ~(u64)0;
 
         for (int i = 0; i < 16; i++)
         {
@@ -285,15 +319,30 @@ bool LocalMP::WaitForPeers(int inst, u64 clock) noexcept
             if (i == inst || !(mask & (1<<i)))
                 continue;
 
-            if (Slots[i].Clock.load(std::memory_order_acquire) < clock)
+            u64 peer = Slots[i].Clock.load(std::memory_order_acquire);
+            if (peer < clock)
             {
                 behind = true;
                 break;
             }
+            if (peer < horizon) horizon = peer;
         }
 
         if (!behind)
+        {
+            // Remember how far ahead everyone actually was, not just that they
+            // cleared this one moment.
+            PeerHorizon[inst] = horizon;
+            HorizonMask[inst] = mask;
+            HorizonValid[inst] = true;
+
+            if (spins)
+            {
+                StatWaitSpins.fetch_add((u64)spins, std::memory_order_relaxed);
+                if (t0) StatWaitSpinMS.fetch_add(Platform::GetMSCount() - t0, std::memory_order_relaxed);
+            }
             return true;
+        }
 
         spins++;
 

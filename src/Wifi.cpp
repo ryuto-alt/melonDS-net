@@ -1064,7 +1064,7 @@ bool Wifi::ProcessTX(TXSlot* slot, int num)
                 if (Lockstep)
                 {
                     Lockstep->ReplyDeadline.store(
-                        Lockstep->Clock.load(std::memory_order_relaxed) + (u64)replywindow * kCyclesPerUS,
+                        Lockstep->Clock.load(std::memory_order_relaxed) + USToCycles(replywindow),
                         std::memory_order_release);
                 }
 

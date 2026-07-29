@@ -497,6 +497,15 @@ void NetplaySession::ApplyInput(int instIdx, u32 frame)
     else
         Instances[instIdx]->ReleaseScreen();
 
+    // Trace the local player's taps: where a touch stops on its way to the
+    // console is otherwise invisible. One line per press and per release.
+    if (instIdx == LocalPlayerID && (input.Touching != 0) != LastLoggedTouch)
+    {
+        LastLoggedTouch = (input.Touching != 0);
+        Log(LogLevel::Info, "Netplay: touch %s at frame %u (%u,%u) on instance %d\n",
+            LastLoggedTouch ? "down" : "up", frame, input.TouchX, input.TouchY, instIdx);
+    }
+
     // Only on change: SetLidClosed(false) raises IRQ_LidOpen on the ARM7
     // every time it is called. Calling it unconditionally every frame storms
     // the firmware with 60 wake-up interrupts a second, which wedges the real
@@ -665,6 +674,11 @@ u32 NetplaySession::RunFrame()
     if ((CurrentFrame % 60) == 0)
     {
         u32 mp = LMP.GetTrafficCount();
+        LocalMP::WaitStats ws = LMP.TakeWaitStats();
+        Log(LogLevel::Info,
+            "Netplay: waits %llu (free %llu) spins %llu, %llu ms\n",
+            (unsigned long long)ws.Calls, (unsigned long long)ws.Cached,
+            (unsigned long long)ws.Spins, (unsigned long long)ws.SpinMS);
         Log(LogLevel::Info,
             "Netplay: frame %u | last frame %u ms | MP packets since last report: %u | scanlines %u/%u | h0 %016llX@%u h1 %016llX@%u | sync %u ok / %u bad\n",
             CurrentFrame, LastFrameMS, mp - LastMPTraffic,
@@ -1001,6 +1015,9 @@ void NetplaySession::HostSyncPeers(u32 newPeerMask)
         }
     }
 
+    // Same starting point for the emulated wireless as every client will have.
+    ResetWirelessWorld();
+
     for (int p = 0; p < kNetplayMaxPlayers; p++)
     {
         if (!(peerMask & (1u << p))) continue;
@@ -1267,6 +1284,9 @@ void NetplaySession::HandleControlMessage(int peerIdx, const u8* data, u32 len)
         CurrentFrame = msg->Frame;
         InputDelay = msg->InputDelay;
 
+        // Same starting point for the emulated wireless as the host just took.
+        ResetWirelessWorld();
+
         // Both sides owe each other the first InputDelay frames of input, and
         // neither has sent any yet -- wipe the history and seed those frames
         // as neutral, exactly like the host did before taking the states.
@@ -1442,6 +1462,42 @@ void NetplaySession::ResetCartlessInstance(int i)
     // the cleared power-lost flag keeps the firmware out of the setup wizard.
     Instances[i]->RTC.SetDateTime(2000, 1, 1, 0, 0, 0);
     Instances[i]->Start();
+}
+
+// Everything about the emulated wireless that a savestate does not carry, put
+// back to one known state on every machine at the same emulated moment.
+//
+// A host that has been running since the previous round has dirty firmware,
+// packets still queued from it, and consoles the MP layer still counts as
+// powered (Wifi::Reset clears PowerOn behind its back). A player joining brings
+// none of that. Each one of those differences changes what the emulated
+// wireless does -- the connected bitmask alone decides whether a CMD frame is
+// considered answered -- so the first session after a rejoin desynced within
+// seconds while the first one had been fine.
+//
+// Run this after the states are in place, on host and clients alike.
+void NetplaySession::ResetWirelessWorld()
+{
+    LMP.ResetQueues();
+
+    for (int i = 0; i < NumInstances; i++)
+    {
+        if (!Instances[i]) continue;
+
+        // Say out loud whether this console's wireless is on, instead of
+        // leaving the MP layer with whatever it happened to be told last.
+        if (Instances[i]->Wifi.IsPowerOn())
+            LMP.Begin(i);
+        else
+            LMP.End(i);
+    }
+
+    // ponytail: the firmware is NOT reinstalled here, though it is the third
+    // thing a savestate does not carry. Doing that broke touch input on the
+    // guest consoles, and it was speculative to begin with -- a console only
+    // writes to its firmware when the user changes settings in the DS menu.
+    // If a stale firmware ever does show up as a desync, ship the host's live
+    // firmware bytes with the savestates instead of rebuilding them locally.
 }
 
 bool NetplaySession::IsStateTransferInstance(int i) const
