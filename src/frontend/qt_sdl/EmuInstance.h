@@ -392,6 +392,7 @@ private:
 
     friend class EmuThread;
     friend class MainWindow;
+    friend class DebugBridge;
 };
 
 #endif //EMUINSTANCE_H

@@ -24,3 +24,7 @@ CMakeCache.txt
 
 melonDS-dist.zip
 melonDS-net-meta/
+
+# MCP サーバの依存とローカル成果物
+tools/mcp-server/node_modules/
+tools/mcp-server/_t*.mjs

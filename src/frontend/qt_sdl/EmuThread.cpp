@@ -56,6 +56,7 @@
 
 #include "EmuInstance.h"
 #include "NetplaySession.h"
+#include "DebugBridge.h"
 
 using namespace melonDS;
 
@@ -68,6 +69,8 @@ EmuThread::EmuThread(EmuInstance* inst, QObject* parent) : QThread(parent)
     emuPauseStack = emuPauseStackRunning;
     emuActive = false;
 }
+
+EmuThread::~EmuThread() = default;
 
 void EmuThread::attachWindow(MainWindow* window)
 {
@@ -109,6 +112,20 @@ void EmuThread::run()
 {
     Config::Table& globalCfg = emuInstance->getGlobalConfig();
     u32 mainScreenPos[3];
+
+    // 解析ブリッジ。ローカル専用の TCP で、MCP サーバ等から RAM を覗ける。
+    // RYUE_BRIDGE_OFF=1 で無効、RYUE_BRIDGE_PORT で開始ポートを指定。
+    if (!getenv("RYUE_BRIDGE_OFF"))
+    {
+        u16 basePort = 8099;
+        if (const char* pe = getenv("RYUE_BRIDGE_PORT"))
+        {
+            int v = atoi(pe);
+            if (v > 0 && v < 65536) basePort = (u16)v;
+        }
+        debugBridge = std::make_unique<DebugBridge>(emuInstance);
+        debugBridge->start(basePort);
+    }
 
     //emuInstance->updateConsole();
     // No carts are inserted when melonDS first boots
@@ -165,6 +182,8 @@ void EmuThread::run()
             MPInterface::Get().Process();
 
         emuInstance->inputProcess();
+
+        if (debugBridge) debugBridge->beforeFrame();
 
         // Netplay has to be serviced outside the "emulator is running" branch.
         // A joining player owns no ROM, so nothing ever put this thread into
@@ -614,7 +633,15 @@ void EmuThread::run()
             emuInstance->drawScreen();
         }
 
+        if (debugBridge) debugBridge->processPending();
+
         handleMessages();
+    }
+
+    if (debugBridge)
+    {
+        debugBridge->stop();
+        debugBridge.reset();
     }
 }
 

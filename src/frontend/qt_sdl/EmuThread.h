@@ -30,6 +30,7 @@
 #include <variant>
 #include <optional>
 #include <list>
+#include <memory>
 
 #include "NDSCart.h"
 #include "GBACart.h"
@@ -41,6 +42,7 @@ class NDS;
 
 class EmuInstance;
 class MainWindow;
+class DebugBridge;
 class ScreenPanelGL;
 
 class EmuThread : public QThread
@@ -50,6 +52,7 @@ class EmuThread : public QThread
 
 public:
     explicit EmuThread(EmuInstance* inst, QObject* parent = nullptr);
+    ~EmuThread() override;   // unique_ptr<DebugBridge> の破棄を .cpp 側に閉じ込める
 
     void attachWindow(MainWindow* window);
     void detachWindow(MainWindow* window);
@@ -147,6 +150,9 @@ public:
     void updateVideoSettings() { videoSettingsDirty = true; }
     void updateVideoRenderer() { videoSettingsDirty = true; lastVideoRenderer = -1; }
 
+    // AI / 外部ツール用の解析ブリッジ(エミュスレッドが所有・実行する)
+    DebugBridge* getDebugBridge() { return debugBridge.get(); }
+
     QWaitCondition glBorrowCond;
     QMutex glBorrowMutex;
 
@@ -206,6 +212,8 @@ private:
     int lastVideoRenderer = -1;
 
     double perfCountsSec;
+
+    std::unique_ptr<DebugBridge> debugBridge;
 
     bool useOpenGL;
     int videoRenderer;
